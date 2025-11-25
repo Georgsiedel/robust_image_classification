@@ -173,7 +173,7 @@ def _noise(x, add_noise_level=0.0, mult_noise_level=0.0, sparse_level=0.0):
     return mult_noise * x + add_noise
 
 def apply_noise(batch, minibatchsize, corruptions, concurrent_combinations, normalized, dataset, manifold=False,
-                manifold_factor=1, noise_sparsity=0.0, noise_patch_lower_scale=0.3, noise_patch_upper_scale=1.0):
+                manifold_factor=1, noise_sparsity=0.0, noise_patch_lower_scale=1.0, noise_patch_upper_scale=1.0):
 
     if corruptions is None:
         return batch
@@ -195,9 +195,14 @@ def apply_noise(batch, minibatchsize, corruptions, concurrent_combinations, norm
     full_minibatches = batch[:batch.size(0) // minibatchsize * minibatchsize].view(-1, minibatchsize, batch.size(1), batch.size(2), batch.size(3))
     residual_batch = batch[batch.size(0) // minibatchsize * minibatchsize:] if batch.size(0) % minibatchsize > 0 else None
     minibatches = chain(full_minibatches, [residual_batch] if residual_batch is not None else [])
+    
+    if isinstance(corruptions, dict):
+        corruptions = [corruptions]
+    elif isinstance(corruptions, np.ndarray):
+        corruptions = corruptions.tolist()
 
     for id, minibatch in enumerate(minibatches):
-        corruptions_list = random.sample(list(corruptions), k=concurrent_combinations)
+        corruptions_list = random.sample(corruptions, k=concurrent_combinations)
 
         #noisy_minibatch = torch.clone(minibatch)
         for _, (corruption) in enumerate(corruptions_list):

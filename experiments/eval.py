@@ -67,12 +67,12 @@ configname = (f'experiments.configs.config{args.experiment}')
 config = importlib.import_module(configname)
 test_corruptions = config.test_corruptions
 
-def compute_clean(testloader, model, num_classes, dataset):
+def compute_clean(testloader, model, num_classes, multilabel = False):
     with torch.no_grad():
         correct = 0
         total = 0
 
-        if dataset in ['WaferMap', 'KITTI_Distance_Multiclass']:
+        if multilabel:
             calibration_metric = BinaryCalibrationError(n_bins=15, norm='l1')
         else:
             calibration_metric = MulticlassCalibrationError(num_classes=num_classes, n_bins=15, norm='l1')
@@ -86,7 +86,7 @@ def compute_clean(testloader, model, num_classes, dataset):
             with torch.amp.autocast('cuda'):
                 outputs = model(inputs)
 
-            if dataset in ['WaferMap', 'KITTI_Distance_Multiclass']:
+            if multilabel:
                 predicted = (torch.sigmoid(outputs) > 0.5).float()
                 matches = predicted.eq(targets)  # shape: [batch_size, num_labels]
                 exact_match = matches.all(dim=1)  # shape: [batch_size], bool tensor
@@ -120,10 +120,10 @@ if __name__ == '__main__':
                                         run=run, number_workers=args.number_workers, kaggle=args.kaggle)
             Dataloader.create_transforms(train_aug_strat_orig='None', train_aug_strat_gen='None')
             Dataloader.load_base_data(test_only=True)
-            workers = 0 if args.validontest else args.number_workers
-            if args.dataset in ['Imagenet','ImageNet-100','KITTI_RoadLane', 'KITTI_Distance_Multiclass', 'TreeSAT', 
-                                'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material']:
-                workers = args.number_workers
+
+            workers = args.number_workers
+            if args.dataset in ['CIFAR10','CIFAR100'] and args.validontest:
+                workers = 0
             
             testloader = torch.utils.data.DataLoader(Dataloader.testset, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
 
@@ -148,16 +148,18 @@ if __name__ == '__main__':
             model.eval()
 
             # Clean Test Accuracy
-            acc, rmsce = compute_clean(testloader, model, Dataloader.num_classes, args.dataset)
+            acc, rmsce = compute_clean(testloader, model, Dataloader.num_classes, Dataloader.multilabel)
             Testtracker.track_results([acc, rmsce], i)
 
             if args.test_on_c == True:  # C-dataset robust accuracy
                 subset = False if args.validontest else True
                 subsetsize = None if args.validontest else 1000 #subset for quick validation runs
 
-                testsets_c = Dataloader.load_data_c(subset=subset, subsetsize=subsetsize, valid_run=False)
-                accs_c = eval_corruptions.compute_c_corruptions(args.dataset, testsets_c, model, args.batchsize,
-                                                                Dataloader.num_classes, valid_run=False, workers=workers)[0]
+                testsets_c = Dataloader.load_data_c(subset=subset, subsetsize=subsetsize, valid_run=False,
+                                                    load_root=None)
+                accs_c = eval_corruptions.compute_c_corruptions(args.dataset, testsets_c, model, args.batchsize, Dataloader.num_classes, 
+                                                                valid_run=False, workers=workers, multilabel=Dataloader.multilabel,
+                                                                save_root="../data")[0]
                 Testtracker.track_results(accs_c, i)
 
             if args.calculate_adv_distance == True:  # adversarial distance calculation

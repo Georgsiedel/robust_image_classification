@@ -12,12 +12,13 @@ import torch
 from PIL import Image
 import numpy as np
 import time
+from typing import Optional
 from experiments.utils import plot_images
 import experiments.style_transfer as style_transfer
 from experiments.custom_datasets import StylizedTensorDataset
 
 class TransformFactory:
-    def __init__(self, re, style_path, strat_name, style, style_and_aug, dataset, minibatchsize=8):
+    def __init__(self, re, soft_crop, style_path, strat_name, style, style_and_aug, dataset, minibatchsize=8):
         self.re = re
         self.TAc = CustomTA_color()
         self.TAg = CustomTA_geometric()
@@ -27,6 +28,7 @@ class TransformFactory:
         self.style_path = style_path
         self.minibatchsize = minibatchsize
         self.dataset = dataset
+        self.soft_crop = soft_crop
 
     def _stylization(self, probability=1.0, alpha_min=0.2, alpha_max=1.0):
         vgg, decoder = style_transfer.load_models()
@@ -55,20 +57,33 @@ class TransformFactory:
                                                                              alpha_max=self.style['alpha_max']))
         
         if self.strat_name == 'None':
-            aug_class = None
+            transforms_potentially_masked = None
         else:
             try:
-                aug_class = getattr(transforms_v2, self.strat_name)()
+                transforms_potentially_masked = getattr(transforms_v2, self.strat_name)()
             except AttributeError:
                 print(f"[Warning] Transform '{self.strat_name}' not found in transforms_v2. Skipping transform.")
-                aug_class = None
-                
-        if self.style_and_aug:
-            after_transforms = MaskIteratorTransforms(transforms_potentially_masked=aug_class, transforms_never_masked=self.re, 
-                                                      filter_mask=False, batchsize=self.minibatchsize)
+                transforms_potentially_masked = None
+        
+        if self.soft_crop is not None:
+            transforms_never_masked = transforms.Compose([self.re, self.soft_crop])
+            handle_confidence_output = True
         else:
-            after_transforms = MaskIteratorTransforms(transforms_potentially_masked=aug_class, transforms_never_masked=self.re, 
-                                                      filter_mask=True, batchsize=self.minibatchsize)
+            transforms_never_masked = transforms.Compose([self.re])
+            handle_confidence_output = False
+
+        if self.style_and_aug:
+            after_transforms = MaskIteratorConfidenceTransforms(transforms_potentially_masked=transforms_potentially_masked, 
+                                                      transforms_never_masked=transforms_never_masked, 
+                                                      filter_mask=False, 
+                                                      handle_confidence_output=handle_confidence_output,
+                                                      batchsize=self.minibatchsize)
+        else:
+            after_transforms = MaskIteratorConfidenceTransforms(transforms_potentially_masked=transforms_potentially_masked, 
+                                                      transforms_never_masked=transforms_never_masked, 
+                                                      filter_mask=True, 
+                                                      handle_confidence_output=handle_confidence_output,
+                                                      batchsize=self.minibatchsize)
         
         return batch_transforms, after_transforms
         
@@ -310,17 +325,9 @@ class RandomCommonCorruptionTransform:
         if self.set == 'c':
             img_np = self.TensorToNumpyUint8(img)
             corrupted_img = self.NumpyUint8ToTensor(transform_c(img_np, severity=severity, corruption_name=self.corruption_name))
-            #img_np = self.PILtoNP(self.TtoPIL(img))
-            #corrupted_img = self.ToTensor(self.NPtoPIL(transform_c(img_np, severity=severity, corruption_name=self.corruption_name)))
         elif self.set == 'c-bar':
             severity_value = self.csv_handler.get_value(self.corruption_name, severity)
-            #comp = transforms.Compose([self.TtoPIL,
-            #                    self.PILtoNP,
-            #    build_transform_c_bar(self.corruption_name, severity_value, self.dataset, self.resize),
-            #    self.NPtoPIL,
-            #    self.ToTensor
-            #    ])
-            
+
             comp = transforms.Compose([
                 self.TensorToNumpyUint8,              # Tensor [0,1] float -> Numpy [0,255] uint8
                 build_transform_c_bar(self.corruption_name, severity_value, self.dataset, self.resize),
@@ -457,39 +464,103 @@ class EmptyTransforms:
     def __call__(self, x):
         return x
 
-class MaskIteratorTransforms:
+class MaskIteratorConfidenceTransforms:
     # Gets a batch of images and a mask 
     # if masked_only=True, applies the transforms only to the unmasked images (where mask==False)
-    # returns batch of images, no mask (inplace operation)
-    def __init__(self, transforms_potentially_masked, transforms_never_masked, filter_mask: bool, batchsize=8):
+    # handles confidence values returned by iterated transforms (e.g. Soft_RandomCrop)
+    # returns batch of images, no mask (inplace operation), but batch of confidence values (either from Soft_RandomCrop or 1.0)
+    def __init__(self, transforms_potentially_masked, transforms_never_masked, filter_mask: bool, 
+                 handle_confidence_output, batchsize=8):
         self.transforms_never_masked = transforms_never_masked
         self.filter_mask = filter_mask
         self.batchsize = batchsize
+        self.handle_confidence_output = handle_confidence_output
 
         # Gracefully compose only non-None transforms
         transform_list = [t for t in [transforms_potentially_masked, transforms_never_masked] if t is not None]
         self.combined_transforms = transforms.Compose(transform_list) if transform_list else None
 
     def __call__(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        # If no transforms are defined at all, just return x
-        if self.combined_transforms is None and self.transforms_never_masked is None:
-            return x
         
+        # create confidence tensor
+        confidences = torch.full((x.shape[0],), 1.0, device=x.device, dtype=x.dtype)
+
+        # If no transforms are defined at all, just return x and 1.0 for confidences
+        if self.combined_transforms is None and self.transforms_never_masked is None:
+            return x, confidences
+
         if self.filter_mask:
             # Apply combined transforms only to unmasked images
             if self.combined_transforms is not None:
-                x[~mask] = torch.cat([self.combined_transforms(minibatch) for minibatch in torch.split(x[~mask], self.batchsize, dim=0)], dim=0)
+
+                data_to_process = x[~mask]
+                conf_to_process = confidences[~mask]
+                num_items = data_to_process.shape[0]
+
+                #inplace loop
+                for start in range(0, num_items, self.batchsize):
+                    end = min(start + self.batchsize, num_items)
+                    minibatch = data_to_process[start:end]
+                    out = self.combined_transforms(minibatch)
+
+                    if self.handle_confidence_output:
+                        out, conf = out
+                    else:
+                        conf = 1.0
+
+                    minibatch[:] = out
+                    conf_to_process[start:end] = torch.full((out.shape[0],), conf, device=out.device, dtype=out.dtype)
+                
+                #write back
+                x[~mask] = data_to_process
+                confidences[~mask] = conf_to_process
 
             # Apply never-masked transforms only to masked images
             if self.transforms_never_masked is not None:
-                x[mask] = torch.cat([self.transforms_never_masked(minibatch) for minibatch in torch.split(x[mask], self.batchsize, dim=0)], dim=0)
 
-            return x
+                data_to_process = x[mask]
+                conf_to_process = confidences[mask]
+                num_items = data_to_process.shape[0]
+
+                #inplace loop
+                for start in range(0, num_items, self.batchsize):
+                    end = min(start + self.batchsize, num_items)
+                    minibatch = data_to_process[start:end]
+                    out = self.transforms_never_masked(minibatch)
+
+                    if self.handle_confidence_output:
+                        out, conf = out
+                    else:
+                        conf = 1.0
+
+                    minibatch[:] = out
+                    conf_to_process[start:end] = torch.full((out.shape[0],), conf, device=out.device, dtype=out.dtype)
+                
+                #write back
+                x[mask] = data_to_process
+                confidences[mask] = conf_to_process
+                        
         else:
             # Apply combined transforms to all images (if defined)
             if self.combined_transforms is not None:
-                x = torch.cat([self.combined_transforms(minibatch) for minibatch in torch.split(x, self.batchsize, dim=0)], dim=0)
-            return x
+
+                num_items = x.shape[0]
+
+                #inplace loop
+                for start in range(0, num_items, self.batchsize):
+                    end = min(start + self.batchsize, num_items)
+                    minibatch = x[start:end]
+                    out = self.combined_transforms(minibatch)
+
+                    if self.handle_confidence_output:
+                        out, conf = out
+                    else:
+                        conf = 1.0
+
+                    minibatch[:] = out
+                    confidences[start:end] = torch.full((out.shape[0],), conf, device=out.device, dtype=out.dtype)
+
+        return x, confidences
         
 class DuringTrainingTransforms:
     def __init__(self, synthetic_ratio, robust_samples, transforms_orig_batch, transforms_gen_batch, transforms_orig_iter, transforms_gen_iter):
@@ -501,54 +572,136 @@ class DuringTrainingTransforms:
         self.robust_samples = robust_samples
 
     def __call__(self, x):
-        total = x.size(0)
+        total = x.shape[0]
         synth_samples = int(total * self.synthetic_ratio)
+        confidences = torch.full((total,), 1.0, device=x.device, dtype=x.dtype)
 
         if self.robust_samples == 2:
-            subset1 = x[int(x.size(0) / 3):int(x.size(0) * 2 / 3)]
-            subset2 = x[int(x.size(0) * 2 / 3):]
+            subset1 = x[int(x.shape[0] / 3):int(x.shape[0] * 2 / 3)]
+            subset2 = x[int(x.shape[0] * 2 / 3):]
+            conf1 = confidences[int(x.shape[0] / 3):int(x.shape[0] * 2 / 3)]
+            conf2 = confidences[int(x.shape[0] * 2 / 3):]
 
             #apply batched and iterative transforms
             if self.synthetic_ratio > 0.0:
                 imgs, mask = self.transforms_gen_batch(subset1[-synth_samples:])
-                subset1[-synth_samples:] = self.transforms_gen_iter(imgs, mask)
+                subset1[-synth_samples:], conf1[-synth_samples:] = self.transforms_gen_iter(imgs, mask)
 
                 imgs, mask = self.transforms_gen_batch(subset2[-synth_samples:])
-                subset2[-synth_samples:] = self.transforms_gen_iter(imgs, mask)
+                subset2[-synth_samples:], conf2[-synth_samples:] = self.transforms_gen_iter(imgs, mask)
 
             if self.synthetic_ratio < 1.0:
                 # (use len - synth_samples to avoid :-0 issue)
                 imgs, mask = self.transforms_orig_batch(subset1[: total - synth_samples])
-                subset1[: total - synth_samples] = self.transforms_orig_iter(imgs, mask)
+                subset1[: total - synth_samples], conf1[: total - synth_samples] = self.transforms_orig_iter(imgs, mask)
 
                 imgs, mask = self.transforms_orig_batch(subset2[: total - synth_samples])
-                subset2[: total - synth_samples] = self.transforms_orig_iter(imgs, mask)
+                subset2[: total - synth_samples], conf2[: total - synth_samples] = self.transforms_orig_iter(imgs, mask)
 
-            x[int(x.size(0) / 3):int(x.size(0) * 2 / 3)] = subset1
-            x[int(x.size(0) * 2 / 3):] = subset2
+            x[int(x.shape[0] / 3):int(x.shape[0] * 2 / 3)] = subset1
+            x[int(x.shape[0] * 2 / 3):] = subset2
+            confidences[int(x.shape[0] / 3):int(x.shape[0] * 2 / 3)] = conf1
+            confidences[int(x.shape[0] * 2 / 3):] = conf2
 
         else:
             
             if self.robust_samples == 0:
                 subset = x
+                conf = confidences
             elif self.robust_samples == 1:
-                subset = x[int(x.size(0) / 2):]
+                subset = x[int(x.shape[0] / 2):]
+                conf = confidences[int(x.shape[0] / 2):]
 
             #apply batched and iterative transforms
             if self.synthetic_ratio > 0.0:
                 imgs, mask = self.transforms_gen_batch(subset[-synth_samples:])
-                subset[-synth_samples:] = self.transforms_gen_iter(imgs, mask)
+                subset[-synth_samples:], conf[-synth_samples:] = self.transforms_gen_iter(imgs, mask)
             if self.synthetic_ratio < 1.0:
                 # (use len - synth_samples to avoid :-0 issue)
                 imgs, mask = self.transforms_orig_batch(subset[: total - synth_samples])
-                subset[: total - synth_samples] = self.transforms_orig_iter(imgs, mask)
+                subset[: total - synth_samples], conf[: total - synth_samples] = self.transforms_orig_iter(imgs, mask)
 
             if self.robust_samples == 0:
                 x = subset
+                confidences = conf
             elif self.robust_samples == 1:
-                x[int(x.size(0) / 2):] = subset
+                x[int(x.shape[0] / 2):] = subset
+                confidences[int(x.shape[0] / 2):] = conf
 
-        return x
+        return x, confidences
+    
+class OneHotAdaptiveConfidenceLabelTransform:
+    def __init__(self, label_smoothing: float, n_class: int, multilabel: bool = False):
+        self.label_smoothing = label_smoothing
+        self.n_class = n_class
+        self.multilabel = multilabel
+
+    def __call__(self, labels, confidences):
+        """
+        labels:
+            single-label: LongTensor [B]
+            multi-label:  float/bool Tensor or ndarray [B, C]
+        confidences:
+            single-label: [B]
+            multi-label:  [B]
+
+        Returns:
+            smoothed labels of shape [B, C]
+        """
+
+        # Convert numpy to torch
+        if isinstance(labels, np.ndarray):
+            labels = torch.from_numpy(labels)
+        if isinstance(confidences, np.ndarray):
+            confidences = torch.from_numpy(confidences)
+
+        labels = labels.to(torch.float32)
+        confidences = confidences.to(torch.float32)
+
+        if self.multilabel is not True:
+            # -------------------------------
+            # SINGLE-LABEL CASE
+            # -------------------------------
+            # labels: [B], confidences: [B]
+
+            assert confidences.shape == labels.shape, "Confidences must match label shape."
+            labels = labels.long().unsqueeze(1)
+            confidences = confidences.unsqueeze(1)
+
+            # Base uniform mass
+            one_hot = torch.ones((labels.shape[0], self.n_class), 
+                                 dtype=torch.float32,
+                                 device=confidences.device)
+
+            one_hot = one_hot * (1 - (confidences * (1 - self.label_smoothing))) / (self.n_class - 1)
+
+            # Fill correct class with confidence
+            one_hot.scatter_(
+                dim=1,
+                index=labels,
+                src=(confidences * (1 - self.label_smoothing))
+            )
+            return one_hot
+
+        else:
+            # -------------------------------
+            # MULTI-LABEL CASE
+            # -------------------------------
+            # labels: [B, C] binary mask
+            # confidences: [B] → one value per sample
+            assert labels.ndim == 2, "Multilabel mode requires labels with shape [B, C]."
+
+            # Expand confidences to match label shape: [B, 1] → [B, C]
+            conf_vec = confidences.unsqueeze(1)  # [B, 1]
+
+            pos_mask = labels                             # 0/1
+            neg_mask = 1 - labels
+
+            pos_values = pos_mask * (conf_vec * (1 - self.label_smoothing))
+            neg_values = neg_mask * (1 - conf_vec * (1 - self.label_smoothing))
+
+            smoothed = pos_values + neg_values
+            return smoothed
 
 class CustomTA_color(transforms_v2.TrivialAugmentWide):
     _AUGMENTATION_SPACE = {
@@ -573,6 +726,130 @@ class CustomTA_geometric(transforms_v2.TrivialAugmentWide):
     "Rotate": (lambda num_bins, height, width: torch.linspace(0.0, 135.0, num_bins), True),
     }
 
+class Soft_RandomCrop:
+    """
+    based on:
+    https://openaccess.thecvf.com/content/CVPR2023/papers/Liu_Soft_Augmentation_for_Image_Classification_CVPR_2023_paper.pdf
+    and adapted as in
+    https://github.com/Georgsiedel/soft_label_random_augmentation
+    
+    A class to apply a random crop transformation to an image and compute and return a 
+    confidence score for the transformed image dependent on the strength of the crop augmentation.
+
+    Attributes:
+    n_class (int): Number of classes for the classification task.
+    k (int): Non-linear function parameter for confidence calculation.
+    bg_crop (float): Background cropping intensity.
+    sigma_crop (float): Standard deviation for drawing the offset.
+    """
+
+    def __init__(
+        self,
+        k: int = 2,
+        bg_crop: float = 1.0,
+        sigma_crop: float = 0.3,
+        #conservative chance level as standard for confidence calculation, assuming no prior knowledge and binary class
+        chance: float = 0.5, 
+        custom: bool = False    
+        ):
+        self.chance = chance  
+        self.k = k
+        self.sigma_crop = sigma_crop
+        self.bg_crop = bg_crop
+        self.custom = custom
+
+    def draw_offset(
+        self,
+        sigma: Optional[float] = 0.3,
+        limit: Optional[int] = 32,
+        n: Optional[int] = 100
+    ) -> int:
+        """Draws a random offset within a specified limit using a normal distribution.
+
+        Args:
+            sigma (float, optional): Standard deviation for the normal distribution. Defaults to 0.3.
+            limit (int, optional): Maximum absolute value for the offset. Defaults to 24.
+            n (int, optional): Number of attempts to draw a valid offset. Defaults to 100.
+
+        Returns:
+            int: The drawn offset within the limit
+        """
+        for _ in range(n):
+            x = torch.randn((1)) * limit * sigma
+            if abs(x) <= limit:
+                return int(x)
+        return int(0)
+
+    def compute_visibility(self, dim1: int, dim2: int, tx: float, ty: float) -> float:
+        """Computes the visibility of the cropped uimage within the background.
+
+        Args:
+            dim1 (int): Height of the image.
+            dim2 (int): Width of the image.
+            tx (int): Horizontal offset.
+            ty (int): Vertical offset.
+
+        Returns:
+            float: Visibility ratio of the cropped image.
+        """
+        return (dim1 - abs(tx)) * (dim2 - abs(ty)) / (dim1 * dim2)
+
+    def __call__(self, image: torch.Tensor) -> torch.Tensor:
+        """Applies the random crop transformation to the given image.
+        Args:
+            image: Tensor of shape (C, H, W) or (B, C, H, W)
+        Returns:
+            tuple: (cropped Tensor, confidence [0,1])
+        """
+        if not isinstance(image, torch.Tensor):
+            raise TypeError(f"Expected Tensor Image but got {type(image)}")
+
+        # Normalize input to 4D (batch mode)
+        if image.ndim == 3:
+            image = image.unsqueeze(0)  # (1, C, H, W)
+            is_batched = False
+        elif image.ndim == 4:
+            is_batched = True
+        else:
+            raise ValueError(f"Expected 3D or 4D tensor, got {image.ndim}D")
+
+        B, C, H, W = image.shape
+        device, dtype = image.device, image.dtype
+
+        # Compute offsets once
+        ty = self.draw_offset(self.sigma_crop, H)
+        tx = self.draw_offset(self.sigma_crop, W)
+
+        # Define crop region
+        left, right = tx + W, tx + W * 2
+        top, bottom = ty + H, ty + H * 2
+
+        # Compute visibility + confidence once
+        if self.custom:
+            visibility = self.compute_visibility(H, W, ty, tx)
+            confidence = 1 - (1 - self.chance) * (1 - visibility) ** self.k
+        else:
+            confidence = 1.0
+
+        # Create batched background (vectorized)
+        bg = (
+            torch.zeros((B, C, H * 3, W * 3), device=device, dtype=dtype)
+            * self.bg_crop
+            * torch.randn((B, C, 1, 1), device=device, dtype=dtype)
+        )
+
+        # Place all images in the center region of the background
+        bg[:, :, H:H * 2, W:W * 2] = image
+
+        # Crop all in one go (same crop region for all)
+        cropped = bg[:, :, top:bottom, left:right]
+
+        # Restore shape if input was not batched
+        if not is_batched:
+            cropped = cropped.squeeze(0)
+
+        return cropped, confidence
+
 class On_GPU_Transforms():
     def __init__(self, transforms_orig_gpu, transforms_orig_post, transforms_gen_gpu, transforms_gen_post):
 
@@ -588,7 +865,7 @@ class On_GPU_Transforms():
 
         x = x.to(device)
 
-        if x.size(0) == 2 * sources.size(0):
+        if x.shape[0] == 2 * sources.shape[0]:
             sources = torch.cat([sources, sources], dim=0)
         
         orig_mask = (sources) & (apply)

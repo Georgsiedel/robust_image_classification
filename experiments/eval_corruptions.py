@@ -1,8 +1,10 @@
 import torch
+import os
 import numpy as np
 from torch.utils.data import DataLoader
 from torchmetrics.classification import MulticlassCalibrationError, BinaryCalibrationError
 from run_0 import device
+from PIL import Image
 from noise import apply_noise
 from utils import plot_images
 
@@ -49,7 +51,8 @@ def compute_p_corruptions(testloader, model, test_corruptions, dataset):
         acc = 100.*correct/total
         return acc
 
-def compute_c_corruptions(dataset, testsets_c, model, batchsize, num_classes, criterion = None, valid_run = False, workers = 0):
+def compute_c_corruptions(dataset, testsets_c, model, batchsize, num_classes, criterion = None, valid_run = False, 
+                          workers = 4, multilabel = False, save_root = None):
 
     from data import seed_worker
 
@@ -61,13 +64,14 @@ def compute_c_corruptions(dataset, testsets_c, model, batchsize, num_classes, cr
     t.manual_seed(0) #ensure that the same testset is always used when we are not working with the fixed benchmarks
 
     for corruption, corruption_testset in testsets_c.items():
-        workers = workers if corruption in ['combined', 'caustic_refraction', 'perlin_noise', 'plasma_noise', 'sparkles'] else 0 #compute heavier corruptions
-        if dataset in ['ImageNet','ImageNet-100', 'KITTI_RoadLane', 'KITTI_Distance_Multiclass', 'TreeSAT', 
-                       'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 'SynthiCAD']:
-            workers = workers
         testloader_c = DataLoader(corruption_testset, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=workers, 
                                   worker_init_fn=seed_worker, generator=t)
-        acc, rmsce_c, avg_loss_c = compute_c(testloader_c, model, num_classes, dataset, criterion)
+
+        acc, rmsce_c, avg_loss_c = compute_c(testloader_c, model, num_classes, 
+                                            criterion, multilabel, 
+                                            dataset_name=dataset,     
+                                        corruption_name=corruption,
+                                        save_root=save_root)
         accs_c.append(acc)
         losses_c.append(avg_loss_c)
         rmsce_c_list.append(rmsce_c)
@@ -91,17 +95,29 @@ def compute_c_corruptions(dataset, testsets_c, model, batchsize, num_classes, cr
 
     return accs_c, avg_loss_c
 
-def compute_c(loader_c, model, num_classes, dataset, criterion = None):
+def compute_c(loader_c, model, num_classes, criterion = None, multilabel = False, dataset_name=None, 
+              corruption_name=None, save_root=None):
     with torch.no_grad():
         model.eval()
         correct, total, loss_c = 0, 0, 0
-        if dataset in ['WaferMap', 'KITTI_Distance_Multiclass']:
+        if multilabel:
             calibration_metric = BinaryCalibrationError(n_bins=15, norm='l1')
         else:
             calibration_metric = MulticlassCalibrationError(num_classes=num_classes, n_bins=15, norm='l1')
-        all_targets = torch.empty(0)
-        all_targets_pred = torch.empty((0, num_classes))
-        all_targets, all_targets_pred = all_targets.to(device), all_targets_pred.to(device)
+        
+        all_targets = torch.empty(0, device=device)
+        all_targets_pred = torch.empty((0, num_classes), device=device)
+
+        if save_root is not None:
+            if corruption_name in ['gaussian_noise','shot_noise','impulse_noise','pixelate','jpeg_compression','defocus_blur',
+                                   'glass_blur','motion_blur','zoom_blur','elastic_transform','speckle_noise','gaussian_blur',
+                                   'fog','frost','snow','spatter','brightness','contrast','saturate']:
+                save_path = os.path.join(save_root, f"{dataset_name}-c/{corruption_name}")
+            else:
+                save_path = os.path.join(save_root, f"{dataset_name}-c-bar/{corruption_name}")
+            os.makedirs(save_root, exist_ok=True)
+
+        uid_counter = 0
 
         for batch_idx, (inputs, targets) in enumerate(loader_c):
             inputs, targets = inputs.to(device, dtype=torch.float), targets.to(device)
@@ -114,13 +130,13 @@ def compute_c(loader_c, model, num_classes, dataset, criterion = None):
             
             avg_test_loss_c = loss_c / (batch_idx + 1)
             
-            if dataset in ['WaferMap','KITTI_Distance_Multiclass']:
+            if multilabel:
                 predicted = (targets_pred > 0.5).float() 
             else:  
                 _, predicted = targets_pred.max(1)
 
             total += targets.size(0)
-            if dataset in ['WaferMap','KITTI_Distance_Multiclass']:
+            if multilabel:
                 matches = predicted.eq(targets)  # shape: [batch_size, num_labels]
                 exact_match = matches.all(dim=1)  # shape: [batch_size], bool tensor
                 correct += exact_match.sum().item()
@@ -129,7 +145,33 @@ def compute_c(loader_c, model, num_classes, dataset, criterion = None):
             all_targets = torch.cat((all_targets, targets), 0)
             all_targets_pred = torch.cat((all_targets_pred, targets_pred), 0)
 
-        if dataset in ['WaferMap','KITTI_Distance_Multiclass']:
+            if save_root is not None:
+                batch_cpu = inputs.cpu()
+                for i in range(batch_cpu.size(0)):
+                        img_tensor = batch_cpu[i]
+
+                        # torchvision tensor → PIL
+                        img_pil = Image.fromarray(
+                            (img_tensor.permute(1, 2, 0).clamp(0, 1).numpy() * 255).astype("uint8")
+                        )
+
+                        # Determine class folder
+                        if multilabel:
+                            # Example: multilabel class folder "0_0_1_0_1_0_0_1"
+                            class_key = "_".join(str(int(x)) for x in targets[i].tolist())
+                        else:
+                            class_key = str(int(targets[i].item()))
+
+                        class_dir = os.path.join(save_path, class_key)
+                        os.makedirs(class_dir, exist_ok=True)
+
+                        # Unique file name
+                        filename = f"{uid_counter}.jpeg"
+                        uid_counter += 1
+
+                        img_pil.save(os.path.join(class_dir, filename), "JPEG")
+
+        if multilabel:
             rmsce_c = float(calibration_metric(all_targets_pred.view(-1), all_targets.view(-1)).cpu())
         else:
             rmsce_c = float(calibration_metric(all_targets_pred, all_targets).cpu())

@@ -21,6 +21,7 @@ import random
 import data
 import torchvision
 import custom_datasets
+import custom_transforms
 import utils
 import losses
 import models
@@ -66,6 +67,9 @@ parser.add_argument('--modelparams', default={}, type=str, action=utils.str2dict
                     help='parameters for the chosen model')
 parser.add_argument('--resize', type=utils.str2bool, nargs='?', const=False, default=False,
                     help='Resize a model to 224x224 pixels, standard for models like transformers.')
+parser.add_argument('--aggressive_soft_crop', type=utils.str2bool, nargs='?', const=False, default=False,
+                    help='Use aggressive random crops combined with adaptive label smoothing (soft augmentation, see ' \
+                    'https://openaccess.thecvf.com/content/CVPR2023/papers/Liu_Soft_Augmentation_for_Image_Classification_CVPR_2023_paper.pdf).')
 parser.add_argument('--train_aug_strat_orig', default='TrivialAugmentWide', type=str, help='augmentation scheme')
 parser.add_argument('--train_aug_strat_gen', default='TrivialAugmentWide', type=str, help='augmentation scheme')
 parser.add_argument('--style_orig', default={'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, type=str,
@@ -130,9 +134,10 @@ parser.add_argument('--generated_ratio', default=0.0, type=float, help='ratio of
 parser.add_argument('--n2n_deepaugment', type=utils.str2bool, nargs='?', const=False, default=False,
                     help='Whether to apply DeepAugment according to https://github.com/hendrycks/imagenet-r')
 parser.add_argument('--stylization_first', type=utils.str2bool, nargs='?', const=False, default=False,
-                    help='True: Stylization and caching of the next batch of images to be stylized upon dataset call. ' \
-                    'False: Stylization of all images to be stylized this epoch before training. False is faster,' \
-                    'but infeasible for large datasets as stylized subset needs to be fit into VRAM')
+                    help='True: Stylization and caching of the next epoch of images upon trainset loading. ' \
+                    'False: Stylization of all images to be stylized batchwise in the training loop. False is faster,' \
+                    'as long as train_aug_strat is not too slow (which is heavily influenced by minibatchsize).' \
+                    'True is infeasible for large datasets as stylized subset needs to be fit into VRAM')
 parser.add_argument(
     "--int_adain_params",
     default={},
@@ -175,8 +180,14 @@ def train_epoch(pbar):
 
         # If not already applied, carry style and augmentation transforms during training here
         if args.stylization_first == False:
-            inputs = Dataloader.during_train_transform(inputs)
+            inputs, confidences = Dataloader.during_train_transform(inputs)
+        else:
+            confidences = confidences = torch.full((inputs.size(0),), 1.0, device=inputs.device, dtype=inputs.dtype)
         
+        #returns smoothed labels according to fixed labelsmoothing and soft augmentation confidence
+        #handles multilabel case internally, returns one hot labels
+        targets = Dataloader.during_train_label_transform(targets, confidences)
+
         if style_dataloader:
             try:
                 style_feats = next(style_iter)
@@ -201,7 +212,7 @@ def train_epoch(pbar):
                                            args.concurrent_combinations, args.noise_sparsity, args.noise_patch_scale['lower'],
                                            args.noise_patch_scale['upper'], Dataloader.generated_ratio, args.n2n_deepaugment, 
                                            style_feats=style_feats, **args.int_adain_params)
-            
+                        
             loss = criterion.calculate_standard_and_robust_loss(outputs, mixed_targets)
 
             with torch.amp.autocast(device_type=device, enabled=False): # recommended for numerical stability
@@ -218,21 +229,20 @@ def train_epoch(pbar):
         if device == 'cuda':
             torch.cuda.synchronize()
         train_loss += loss.item()
-
-        _, predicted = outputs.max(1)
         
-        if args.dataset in ['WaferMap', 'KITTI_Distance_Multiclass']:
+        if Dataloader.multilabel:
             predicted = (torch.sigmoid(outputs) > 0.5).float()
             mixed_targets = (mixed_targets > 0.5).float()
-        elif np.ndim(mixed_targets) == 2:    
+        elif np.ndim(mixed_targets) == 2:
+            _, predicted = outputs.max(1)    
             _, mixed_targets = mixed_targets.max(1)
 
         if criterion.robust_samples >= 1:
             mixed_targets = torch.cat([mixed_targets] * (criterion.robust_samples+1), 0)
 
         total += mixed_targets.size(0)
-        if args.dataset in ['WaferMap', 'KITTI_Distance_Multiclass']:
-                matches = predicted.eq(targets)  # shape: [batch_size, num_labels]
+        if Dataloader.multilabel:
+                matches = predicted.eq(mixed_targets)  # shape: [batch_size, num_labels]
                 exact_match = matches.all(dim=1)  # shape: [batch_size], bool tensor
                 correct += exact_match.sum().item()
         else:
@@ -268,13 +278,13 @@ def valid_epoch(pbar, net):
 
             test_loss += loss.item()
 
-            if args.dataset in ['WaferMap', 'KITTI_Distance_Multiclass']:
+            if Dataloader.multilabel:
                 predicted = (torch.sigmoid(outputs) > 0.5).float()
             else:
                 _, predicted = outputs.max(1)
 
             total += targets.size(0)
-            if args.dataset in ['WaferMap', 'KITTI_Distance_Multiclass']:
+            if Dataloader.multilabel:
                 matches = predicted.eq(targets)  # shape: [batch_size, num_labels]
                 exact_match = matches.all(dim=1)  # shape: [batch_size], bool tensor
                 correct += exact_match.sum().item()
@@ -290,20 +300,22 @@ def valid_epoch(pbar, net):
             pbar.set_description(
                 '[Valid] Robust Accuracy Calculation. Last Robust Accuracy: {:.3f}'.format(Traintracker.valid_accs_robust[-1] if Traintracker.valid_accs_robust else 0))
             acc_c = compute_c_corruptions(args.dataset, testsets_c, net, batchsize=500, num_classes=Dataloader.num_classes, valid_run = True, 
-                                          workers = 0)[0][0]
+                                          workers = 0, multilabel=Dataloader.multilabel)[0][0]
         pbar.update(1)
 
     acc = 100. * correct / total
     adv_acc = 100. * adv_correct / total
     return acc, avg_test_loss, acc_c, adv_acc
 
-def update_bn_with_aug(dataloader, model, augment_fn, batchsize):
+def update_bn_with_aug(dataloader, model, augment_fn):
     model.train()
-    dataloader.batch_sampler.batch_size = batchsize
-    for inputs, _ in dataloader:
-        inputs = inputs.to(device)
-        inputs = augment_fn(inputs)
-        model(inputs)
+    with torch.no_grad():
+        for inputs, _ in dataloader:
+            inputs = inputs.to(device)
+            if augment_fn:
+                inputs, _ = augment_fn(inputs)
+            model(inputs)
+    return model
 
 if __name__ == '__main__':
     # Load and transform data
@@ -317,14 +329,17 @@ if __name__ == '__main__':
     np.random.seed(args.run)
     random.seed(args.run)
 
+    label_smoothing = args.lossparams.pop('label_smoothing', 0.0)
     lossparams = args.trades_lossparams | args.robust_lossparams | args.lossparams
     criterion = losses.Criterion(args.loss, trades_loss=args.trades_loss, robust_loss=args.robust_loss, **lossparams)
     Dataloader = data.DataLoading(args.dataset, args.validontest, args.epochs, args.resize, args.run, args.number_workers, 
                                   kaggle=args.kaggle)
     Dataloader.create_transforms(args.train_aug_strat_orig, args.train_aug_strat_gen, args.style_orig, args.style_gen, 
                                  args.style_and_aug_orig, args.style_and_aug_gen, args.RandomEraseProbability, 
-                                 args.stylization_first, args.minibatchsize)
+                                 args.aggressive_soft_crop, args.stylization_first, args.minibatchsize, label_smoothing)
     Dataloader.load_base_data(test_only=False)
+    #updating soft_crop if given so that chance = 1 / num_classes (num_classes is loaded only upon base_data loading)
+    Dataloader.update_transforms(aggressive_soft_crop=args.aggressive_soft_crop) 
     testsets_c = Dataloader.load_data_c(subset=True, subsetsize=min(200, int(len(Dataloader.testset)/10)), valid_run=True) if args.validonc else None
     
     # Construct model
@@ -427,11 +442,13 @@ if __name__ == '__main__':
     if args.swa['apply'] == True:
         print("Saving final SWA model, one more forward pass to update its BN stats with augmented data from outside the dataloader")
         if criterion.robust_samples >= 1:
+            print('here is wrong')
             SWA_Loader = custom_datasets.SwaLoader(trainloader, args.batchsize, criterion.robust_samples)
             trainloader = SWA_Loader.get_swa_dataloader()
         
+        bn_transform = Dataloader.during_train_transform if args.stylization_first == True else None
         #Custom batchnorm update when we do augmentations in the train loop instead of in the dataloader 
-        update_bn_with_aug(trainloader, swa_model, Dataloader.during_train_transform, 32)
+        swa_model = update_bn_with_aug(trainloader, swa_model, Dataloader.during_train_transform)
         #torch.optim.swa_utils.update_bn(trainloader, swa_model, device)
         model = swa_model
 

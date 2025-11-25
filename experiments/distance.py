@@ -210,9 +210,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    for dataset in ['SynthiCAD', 'PCAM', 'ImageNet-100']:
+    for dataset in ['ImageNet-100']:
         
-        for norm_distance in [1, 2, np.inf]:
+        for norm_distance in [2]:
             if dataset in ['SynthiCAD'] and norm_distance in [2]:
                 print('skipping')
                 continue
@@ -230,7 +230,7 @@ if __name__ == '__main__':
             traintrain = np.sort(traintrain_ret[traintrain_ret != 0])
             traintest = np.sort(traintest_ret[traintest_ret != 0])
             testtest = np.sort(testtest_ret[testtest_ret != 0])
-            first_distances_to_save = 100
+            first_distances_to_save = 200
                 
             summary = np.array([
                 [len(traintrain), len(traintest), len(testtest)],

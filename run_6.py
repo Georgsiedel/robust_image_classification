@@ -30,6 +30,7 @@ if __name__ == '__main__':
                     f"--earlystop={config.earlystop} --earlystopPatience={config.earlystopPatience} --optimizer=" \
                     f"{config.optimizer} --optimizerparams=\"{config.optimizerparams}\" --modeltype=" \
                     f"{config.modeltype} --modelparams=\"{config.modelparams}\" --resize={config.resize} " \
+                    f"--aggressive_soft_crop={config.aggressive_soft_crop} " \
                     f"--style_orig=\"{config.style_orig}\" --train_aug_strat_orig={config.train_aug_strat_orig} " \
                     f"--style_gen=\"{config.style_gen}\" --train_aug_strat_gen={config.train_aug_strat_gen} " \
                     f"--style_and_aug_orig={config.style_and_aug_orig} --style_and_aug_gen={config.style_and_aug_gen} " \

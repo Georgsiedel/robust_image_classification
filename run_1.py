@@ -7,7 +7,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 if __name__ == '__main__':
 
-    for experiment in [4]:
+    for experiment in [15]:#
 
         configname = (f'experiments.configs.config{experiment}')
         config = importlib.import_module(configname)
@@ -16,12 +16,12 @@ if __name__ == '__main__':
         kaggle = False
 
         print('Starting experiment #',experiment, 'on', config.dataset, 'dataset')
-        runs = 3
-        run_iters = [0,1,2]
+        runs = 1
+        run_iters = [0]
 
         for run in run_iters:
 
-            resume = True if experiment in [4] and run in [0] else False
+            resume = True if experiment in [4,5] and run in [0] else False
 
             print("Training run #",run)
             cmd0 = f"python experiments/train.py --resume={resume} --run={run} --experiment={experiment} --epochs=" \
@@ -30,6 +30,7 @@ if __name__ == '__main__':
                     f"--earlystop={config.earlystop} --earlystopPatience={config.earlystopPatience} --optimizer=" \
                     f"{config.optimizer} --optimizerparams=\"{config.optimizerparams}\" --modeltype=" \
                     f"{config.modeltype} --modelparams=\"{config.modelparams}\" --resize={config.resize} " \
+                    f"--aggressive_soft_crop={config.aggressive_soft_crop} " \
                     f"--style_orig=\"{config.style_orig}\" --train_aug_strat_orig={config.train_aug_strat_orig} " \
                     f"--style_gen=\"{config.style_gen}\" --train_aug_strat_gen={config.train_aug_strat_gen} " \
                     f"--style_and_aug_orig={config.style_and_aug_orig} --style_and_aug_gen={config.style_and_aug_gen} " \

@@ -16,25 +16,10 @@ services:
       CUDA_HOME: "/usr/local/cuda"
       LD_LIBRARY_PATH: "/usr/local/lib:/usr/lib:/lib:$LD_LIBRARY_PATH"
     volumes:
-      - /data/siedel/datasets:/data
-      #- /home/siedel/data/ImageNet:/data/ImageNet
-      #- /home/siedel/data/TinyImageNet:/data/TinyImageNet
-      - /home/siedel/trained_models:/trained_models
-      - ./results:/workspace/results
-      - ./experiments/configs:/workspace/experiments/configs
-      - ./experiments/train.py:/workspace/experiments/train.py
-      - ./experiments/distance.py:/workspace/experiments/distance.py
-      - ./experiments/data.py:/workspace/experiments/data.py
-      - ./experiments/custom_transforms.py:/workspace/experiments/custom_transforms.py
-      - ./experiments/custom_datasets.py:/workspace/experiments/custom_datasets.py
-      - ./run_0.py:/workspace/run_0.py
-      - ./run_1.py:/workspace/run_1.py
-      - ./run_2.py:/workspace/run_2.py
-      - ./run_3.py:/workspace/run_3.py
-      - ./run_4.py:/workspace/run_4.py
-      - ./run_5.py:/workspace/run_5.py
-      - ./run_6.py:/workspace/run_6.py
-      - ./run_7.py:/workspace/run_7.py
+      - ../datasets:/data
+      - ../trained_models:/trained_models
+      - ../robust_training:/workspace
+
     #command: python run_exp.py  # Run the main script for this container
     tty: true
 

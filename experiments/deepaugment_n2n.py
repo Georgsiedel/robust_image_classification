@@ -148,7 +148,7 @@ class Bottle2neck(nn.Module):
         return out
 
 class Res2Net(torch.nn.Module):
-    def __init__(self, epsilon=0.5, hidden_planes=16, batch_size=5):
+    def __init__(self, epsilon=0.2, hidden_planes=16, batch_size=5):
         super(Res2Net, self).__init__()
         
         self.epsilon = epsilon

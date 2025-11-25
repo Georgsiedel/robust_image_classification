@@ -130,6 +130,11 @@ class DataLoading():
         else:
             self.factor = 1
         
+        if dataset in ['WaferMap', 'KITTI_Distance_Multiclass']:
+            self.multilabel = True
+        else:
+            self.multilabel = False
+        
         file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "paths.json")
         with open(file_path, "r") as f:
             paths = json.load(f)
@@ -159,8 +164,11 @@ class DataLoading():
                           style_orig={'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, 
                           style_gen={'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, 
                           style_and_aug_orig=True, style_and_aug_gen=True, 
-                          RandomEraseProbability=0.0, stylization_first=False,
-                          minibatchsize=8):
+                          RandomEraseProbability=0.0, 
+                          aggressive_soft_crop=False,
+                          stylization_first=False,
+                          minibatchsize=8,
+                          label_smoothing=0.0):
         self.train_aug_strat_orig = train_aug_strat_orig
         self.train_aug_strat_gen = train_aug_strat_gen
         self.style_orig = style_orig
@@ -170,7 +178,11 @@ class DataLoading():
         self.stylization_first = stylization_first
         self.RandomEraseProbability = RandomEraseProbability
         self.minibatchsize = minibatchsize
+        self.label_smoothing = label_smoothing
+
         # list of all data transformations used
+        self.soft_crop = custom_transforms.Soft_RandomCrop(custom=True) if aggressive_soft_crop else None
+
         t = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.float32, scale=True)])
         t_no_scaling = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.float32)])
         c32 = transforms.RandomCrop(32, padding=4)
@@ -190,7 +202,8 @@ class DataLoading():
         cc224 = transforms.CenterCrop(224)
         rrc176 = transforms.RandomResizedCrop(176, antialias=True)
         rrc224 = transforms.RandomResizedCrop(224, antialias=True)
-        re = transforms.RandomErasing(p=self.RandomEraseProbability, scale=(0.02, 0.4))
+        self.re = transforms.RandomErasing(p=self.RandomEraseProbability, scale=(0.02, 0.4))
+        
 
         # transformations of validation/test set and necessary transformations for training
         # always done (even for clean images while training, when using robust loss)
@@ -255,14 +268,15 @@ class DataLoading():
         elif self.dataset in ['WaferMap']:
             self.transforms_basic = transforms.Compose([flip, flip_v, c64_WM])
 
-        if self.resize == True and self.dataset in ['TinyImageNet', 'PCAM', 'WaferMap', 'EuroSAT', 'CIFAR10', 'CIFAR100', 'GTSRB']:
-            self.transforms_basic = transforms.Compose(self.transforms_basic[:-1])#get rid of crop/resize
+        if (self.resize or aggressive_soft_crop) and self.dataset in ['TinyImageNet', 'PCAM', 'WaferMap', 'EuroSAT', 
+                                                                           'CIFAR10', 'CIFAR100', 'GTSRB']:
+            self.transforms_basic = transforms.Compose(self.transforms_basic[:-1]) #get rid of crop/resize
 
-        transform_manager_orig = custom_transforms.TransformFactory(re, self.style_feats_path, train_aug_strat_orig, 
-                                                                    style_orig, style_and_aug_orig, self.dataset, minibatchsize)
-        transform_manager_gen = custom_transforms.TransformFactory(re, self.style_feats_path, train_aug_strat_gen, 
-                                                                    style_gen, style_and_aug_gen, self.dataset, minibatchsize)
-        if stylization_first:
+        transform_manager_orig = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_orig, 
+                                                                    self.style_orig, self.style_and_aug_orig, self.dataset, self.minibatchsize)
+        transform_manager_gen = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_gen, 
+                                                                    self.style_gen, self.style_and_aug_gen, self.dataset, self.minibatchsize)
+        if self.stylization_first:
             self.stylization_orig, self.transforms_orig_after_style, self.transforms_orig_after_nostyle = transform_manager_orig.get_transforms_style_first()
             self.stylization_gen, self.transforms_gen_after_style, self.transforms_gen_after_nostyle = transform_manager_gen.get_transforms_style_first()
         else:
@@ -270,12 +284,17 @@ class DataLoading():
             self.stylization_gen, self.transforms_gen_after_style = transform_manager_gen.get_transforms()
         
         
-    def update_transforms(self, stylize_prob_orig=None, stylize_prob_syn=None, alpha_min_orig=None, 
-                          alpha_min_syn=None, style_and_aug_orig=None, style_and_aug_syn=None, RandomEraseProbability=None):
+    def update_transforms(self, stylize_prob_orig=None, stylize_prob_syn=None, alpha_min_orig=None, alpha_min_syn=None, 
+                          style_and_aug_orig=None, style_and_aug_syn=None, RandomEraseProbability=None, aggressive_soft_crop=None):
         
-        if RandomEraseProbability is None:
-            RandomEraseProbability = self.RandomEraseProbability
-        re = transforms.RandomErasing(p=RandomEraseProbability, scale=(0.02, 0.4))
+        if RandomEraseProbability is not None:
+            self.re = transforms.RandomErasing(p=RandomEraseProbability, scale=(0.02, 0.4))
+
+        if aggressive_soft_crop is not None:
+            max_value = 0.5 if self.multilabel else 0.0 #set to 0.5 for multilabel where every class is binary
+            # standard value for chance in class is the conservative 0.5, when no num_classes known
+            kwargs = {"chance": max(1 / self.num_classes, max_value)} if hasattr(self, "num_classes") else {}
+            self.soft_crop = custom_transforms.Soft_RandomCrop(custom=True, **kwargs) if aggressive_soft_crop else None
 
         if stylize_prob_orig is not None:
             self.style_orig['probability'] = stylize_prob_orig
@@ -290,9 +309,9 @@ class DataLoading():
         if style_and_aug_syn is not None:
             self.style_and_aug_gen = style_and_aug_syn
 
-        transform_manager_orig = custom_transforms.TransformFactory(re, self.style_feats_path, self.train_aug_strat_orig, 
+        transform_manager_orig = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_orig, 
                                                                     self.style_orig, self.style_and_aug_orig, self.dataset, self.minibatchsize)
-        transform_manager_gen = custom_transforms.TransformFactory(re, self.style_feats_path, self.train_aug_strat_gen, 
+        transform_manager_gen = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_gen, 
                                                                     self.style_gen, self.style_and_aug_gen, self.dataset, self.minibatchsize)
         if self.stylization_first:
             self.stylization_orig, self.transforms_orig_after_style, self.transforms_orig_after_nostyle = transform_manager_orig.get_transforms_style_first()
@@ -555,14 +574,18 @@ class DataLoading():
             if not hasattr(self, "generated_dataset"):
                 try:
                     if self.dataset == "ImageNet-100":
-                        self.generated_dataset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-synthetic'),
-                                                                        loader=kornia.io.load_image)
+                        self.generated_dataset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}-add-1m-dm.h5')
+                        #self.generated_dataset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-synthetic'),
+                        #                                                loader=kornia.io.load_image)
                         self.generated_dataset_length = len(self.generated_dataset)
-                    else:
+                    elif self.dataset in ["CIFAR100", "CIFAR10"]:
                         self.generated_dataset = np.load(os.path.abspath(f'{self.data_path}/{self.dataset}-add-1m-dm.npz'),
                                                 mmap_mode='r') 
                         self.generated_dataset_length = len(self.generated_dataset['label'])
-
+                    else:
+                        self.generated_dataset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}_GAN'),
+                                                                        loader=kornia.io.load_image)
+                        self.generated_dataset_length = len(self.generated_dataset)
                     self.generated_ratio = generated_ratio
                 except:
                     print(f'No synthetic data found for this dataset in {self.data_path}/{self.dataset}-add-1m-dm.npz')
@@ -600,14 +623,15 @@ class DataLoading():
             if self.num_generated > 0 and self.generated_dataset is not None:
                 generated_indices = np.random.choice(self.generated_dataset_length, size=self.num_generated, replace=False)
 
-                if self.dataset == "ImageNet-100":
-                    generated_subset = SubsetWithTransform(Subset(self.generated_dataset, generated_indices), self.transforms_preprocess_train)
-                else:
+                if self.dataset in ["CIFAR100", "CIFAR10"]:
                     generated_subset = NumpyDataset(
                         self.generated_dataset['image'][generated_indices],
                         self.generated_dataset['label'][generated_indices],
                         transform=self.transforms_preprocess_train
                     )
+                else:
+                    generated_subset = SubsetWithTransform(Subset(self.generated_dataset, generated_indices), 
+                                                           self.transforms_preprocess_train)
 
                 if self.stylization_gen is not None:
                     stylized_generated_subset, style_mask_gen = self.stylization_gen(generated_subset)
@@ -633,86 +657,127 @@ class DataLoading():
             if self.num_generated > 0 and self.generated_dataset is not None:
                 generated_indices = np.random.choice(self.generated_dataset_length, size=self.num_generated, replace=False)
 
-                if self.dataset == "ImageNet-100":
-                    generated_subset = SubsetWithTransform(Subset(self.generated_dataset, generated_indices), self.transforms_preprocess_train)
-                else:
+                if self.dataset in ["CIFAR100", "CIFAR10"]:
                     generated_subset = NumpyDataset(
                         self.generated_dataset['image'][generated_indices],
                         self.generated_dataset['label'][generated_indices],
                         transform=self.transforms_preprocess_train
                     )
+                else:
+                    generated_subset = SubsetWithTransform(Subset(self.generated_dataset, generated_indices), self.transforms_preprocess_train)
+
             else:
                 generated_subset = None
 
             self.during_train_transform = custom_transforms.DuringTrainingTransforms(generated_ratio, robust_samples, 
-                                                                                     self.stylization_orig, self.stylization_gen, 
+                                                                                     self.stylization_orig, 
+                                                                                     self.stylization_gen, 
                                                                                      self.transforms_orig_after_style,
                                                                                      self.transforms_gen_after_style)
+            self.during_train_label_transform = custom_transforms.OneHotAdaptiveConfidenceLabelTransform(self.label_smoothing, 
+                                                                                                         self.num_classes,
+                                                                                                         self.multilabel)
             
             self.trainset = BasicAugmentedDataset(original_subset, generated_subset, self.transforms_basic, self.robust_samples)
     
-    def precompute_and_append_c_data(self, set, c_datasets, corruption, csv_handler, subset, subsetsize, valid_run):
-        random_corrupted_testset = SubsetWithTransform(self.testset, 
-                                                    transform=custom_transforms.RandomCommonCorruptionTransform(set, corruption, self.dataset, csv_handler, self.resize))
-        if subset == True:
-            selected_indices = np.random.choice(len(self.testset), subsetsize, replace=False)
-            random_corrupted_testset = Subset(random_corrupted_testset, selected_indices)
-        
-        # If valid_run, precompute the transformed outputs and wrap them as a standard dataset. (we do not want to tranform every epoch)
-        if valid_run:
+    def precompute_and_append_c_data(self, set, c_datasets, corruption, csv_handler, subset, subsetsize,
+                valid_run, load_root='../data'):
 
-            batch_size = min(100, subsetsize)
-            workers = 8 if corruption in ['caustic_refraction', 'perlin_noise', 'plasma_noise', 'sparkles'] else 2
+        random_corrupted_testset = None
+        loaded_from_repo = False
+
+        # --- Try to load from disk if load_root was explicitly provided ---
+        if load_root is not None:
+            base_paths = [
+                os.path.join(load_root, f"{self.dataset}-c", corruption),
+                os.path.join(load_root, f"{self.dataset}-c-bar", corruption)
+            ]
+
+            for repo_path in base_paths:
+                if os.path.isdir(repo_path) and any(os.scandir(repo_path)):
+                    random_corrupted_testset = torchvision.datasets.ImageFolder(
+                        root=repo_path,
+                        transform=getattr(self.testset, "transform", None),
+                        loader=kornia.io.load_image
+                    )
+                    loaded_from_repo = True
+                    break
+
+            if not loaded_from_repo:
+                print(
+                    f"No precomputed corruption found at either:\n"
+                    f"  {base_paths[0]}\n  {base_paths[1]}\n"
+                    "Falling back to on-the-fly corruption."
+                )
+
+        # --- Fallback: use on-the-fly corruption ---
+        if random_corrupted_testset is None:
+            random_corrupted_testset = SubsetWithTransform(
+                self.testset,
+                transform=custom_transforms.RandomCommonCorruptionTransform(
+                    set, corruption, self.dataset, csv_handler, self.resize
+                )
+            )
+
+        # --- Apply subset if requested ---
+        if subset:
+            selected_indices = np.random.choice(
+                len(random_corrupted_testset), subsetsize, replace=False
+            )
+            random_corrupted_testset = Subset(random_corrupted_testset, selected_indices)
+
+        # --- Precompute only if NOT loaded from repo ---
+        if valid_run and not loaded_from_repo:
+            batch_size = min(200, subsetsize)
+
+            workers = (
+                self.number_workers
+                if corruption in ['caustic_refraction', 'perlin_noise',
+                                'plasma_noise', 'sparkles']
+                and self.dataset not in ['CIFAR10', 'CIFAR100', 'TinyImageNet',
+                                        'EuroSAT', 'WaferMap', 'GTSRB', 'PCAM']
+                else 0
+            )
 
             r = torch.Generator()
-            r.manual_seed(0) #ensure that the same testset is always used when generating random corruptions
+            r.manual_seed(0)
 
             precompute_loader = DataLoader(
                 random_corrupted_testset,
                 batch_size=batch_size,
                 shuffle=False,
                 pin_memory=True,
-                num_workers=workers, #because of some pickle error with multiprocessing 0 may be needed
+                num_workers=workers,
                 worker_init_fn=seed_worker,
                 generator=r,
                 drop_last=False
             )
-            
-            # Collect all batches into tensors (no double for loop needed!)
-            all_samples = []
-            all_labels = []
 
-            if corruption in ['gaussian_noise', 'shot_noise', 'impulse_noise', 'defocus_blur', 'glass_blur', 
-                              'motion_blur', 'zoom_blur', 'snow', 'frost', 'fog', 'brightness', 'contrast',
-                              'elastic_transform', 'pixelate', 'jpeg_compression', 'speckle_noise', 'gaussian_blur',
-                              'spatter', 'saturate', 'blue_noise_sample', 'brownish_noise']:
-                return c_datasets
-                        
+            all_samples, all_labels = [], []
+
             for batch_samples, batch_labels in precompute_loader:
                 all_samples.append(batch_samples)
                 all_labels.append(batch_labels)
-            
-            # Concatenate all batches into single tensors
+
             all_samples_tensor = torch.cat(all_samples, dim=0)
             all_labels_tensor = torch.cat(all_labels, dim=0)
-            
-            # Use TensorDataset - much more efficient than ListDataset
-            random_corrupted_testset = TensorDataset(all_samples_tensor, all_labels_tensor)
 
-                                
+            random_corrupted_testset = TensorDataset(
+                all_samples_tensor, all_labels_tensor
+            )
+
         c_datasets.append(random_corrupted_testset)
-
         return c_datasets
 
-    def load_data_c(self, subset, subsetsize, valid_run):
+    def load_data_c(self, subset, subsetsize, valid_run, load_root='../data'):
 
         c_datasets = []
         #c-corruption benchmark: https://github.com/hendrycks/robustness
         corruptions_c = np.asarray(np.loadtxt(os.path.join(self.c_labels_path, "c-labels.txt"), dtype=list))
         
-        np.random.seed(self.run) # to make subsamples reproducible
-        torch.manual_seed(self.run)
-        random.seed(self.run)
+        np.random.seed(0) # to make subsamples reproducible
+        torch.manual_seed(0)
+        random.seed(0)
         global fixed_worker_rng #impulse noise augmentations sk-learn function needs a separate rng for reproducibility
         fixed_worker_rng = np.random.default_rng()
 
@@ -765,20 +830,26 @@ class DataLoading():
                     c_datasets = self.precompute_and_append_c_data(set, c_datasets, corruption, csv_handler, subset, subsetsize, valid_run)
 
         else:
-            if self.validontest:
-                print('No c- and c-bar-benchmark available for this dataset. Computing custom corruptions.')
+            if self.validontest and load_root == None:
+                print('No c- and c-bar-benchmark available for this dataset. Building custom corruptions.')
+            elif self.validontest and load_root is not None:
+                print('No c- and c-bar-benchmark available for this dataset. Using custom prebuilt corruptions.')
 
             if self.dataset in ['GTSRB', 'Wafermap']:
                 csv_handler = CsvHandler(os.path.abspath(f'{self.c_labels_path}/cifar_c_bar.csv'))
+                corruptions_bar = csv_handler.read_corruptions()
+            elif self.dataset in ['KITTI_RoadLane', 'KITTI_Distance_Multiclass']:
+                corruptions_bar = []
+                csv_handler = None
             else:
                 csv_handler = CsvHandler(os.path.abspath(f'{self.c_labels_path}/imagenet_c_bar.csv'))
-
-            corruptions_bar = csv_handler.read_corruptions()
-
+                corruptions_bar = csv_handler.read_corruptions()
+            
             corruptions = [(string, 'c') for string in corruptions_c] + [(string, 'c-bar') for string in corruptions_bar]
             
             for corruption, set in corruptions:
-                c_datasets = self.precompute_and_append_c_data(set, c_datasets, corruption, csv_handler, subset, subsetsize, valid_run)
+                c_datasets = self.precompute_and_append_c_data(set, c_datasets, corruption, csv_handler, 
+                                                               subset, subsetsize, valid_run, load_root)
 
         if valid_run == True:
             c_datasets = ConcatDataset(c_datasets)

@@ -99,8 +99,23 @@ parser.add_argument('--modelparams', default={}, type=str, action=utils.str2dict
                     help='parameters for the chosen model')
 parser.add_argument('--resize', type=utils.str2bool, nargs='?', const=False, default=False,
                     help='Resize a model to 224x224 pixels, standard for models like transformers.')
+parser.add_argument('--aggressive_soft_crop', type=utils.str2bool, nargs='?', const=False, default=False,
+                    help='Use aggressive random crops combined with adaptive label smoothing (soft augmentation, see ' \
+                    'https://openaccess.thecvf.com/content/CVPR2023/papers/Liu_Soft_Augmentation_for_Image_Classification_CVPR_2023_paper.pdf).')
 parser.add_argument('--train_aug_strat_orig', default='TrivialAugmentWide', type=str, help='augmentation scheme')
 parser.add_argument('--train_aug_strat_gen', default='TrivialAugmentWide', type=str, help='augmentation scheme')
+parser.add_argument('--style_orig', default={'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, type=str,
+                    action=utils.str2dictAction, metavar='KEY=VALUE', help='parameters for stylization of generated '
+                    'images. 0.0 probability means no stylization.')
+parser.add_argument('--style_gen', default={'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, type=str,
+                    action=utils.str2dictAction, metavar='KEY=VALUE', help='parameters for stylization of generated '
+                    'images. 0.0 probability means no stylization.')
+parser.add_argument('--style_and_aug_orig', type=utils.str2bool, nargs='?', const=False, default=True,
+                    help='Apply Stylization and main augmentation strategy sequentially to original images. If False, ' \
+                    'main augmentation only on images that are not stylized due to stylize probability.')
+parser.add_argument('--style_and_aug_gen', type=utils.str2bool, nargs='?', const=False, default=True,
+                    help='Apply Stylization and main augmentation strategy sequentially to generated images. If False, ' \
+                    'main augmentation only on images that are not stylized due to stylize probability.')
 parser.add_argument('--loss', default='CrossEntropyLoss', type=str, help='loss function to use, chosen from torch.nn loss functions')
 parser.add_argument('--lossparams', default={}, type=str, action=utils.str2dictAction, metavar='KEY=VALUE',
                     help='parameters for the standard loss function')
@@ -150,10 +165,11 @@ parser.add_argument('--generated_ratio', default=0.0, type=float, help='ratio of
                     'into every training batch')
 parser.add_argument('--n2n_deepaugment', type=utils.str2bool, nargs='?', const=False, default=False,
                     help='Whether to apply DeepAugment according to https://github.com/hendrycks/imagenet-r')
-parser.add_argument('--grouped_stylization', type=utils.str2bool, nargs='?', const=False, default=False,
-                    help='True: Stylization and caching of the next batch of images to be stylized upon dataset call. ' \
-                    'False: Stylization of all images to be stylized this epoch before training. False is faster,' \
-                    'but infeasible for large datasets as stylized subset needs to be fit into VRAM')
+parser.add_argument('--stylization_first', type=utils.str2bool, nargs='?', const=False, default=False,
+                    help='True: Stylization and caching of the next epoch of images upon trainset loading. ' \
+                    'False: Stylization of all images to be stylized batchwise in the training loop. False is faster,' \
+                    'as long as train_aug_strat is not too slow (which is heavily influenced by minibatchsize).' \
+                    'True is infeasible for large datasets as stylized subset needs to be fit into VRAM')
 parser.add_argument(
     "--int_adain_params",
     default={},
@@ -349,11 +365,14 @@ def manual_replay(config, start_epoch, end_epoch, resume, final=False):
     np.random.seed(args.run)
     random.seed(args.run)
 
+    label_smoothing = args.lossparams.pop('label_smoothing', 0.0)
     lossparams = args.trades_lossparams | args.robust_lossparams | args.lossparams
     criterion = losses.Criterion(args.loss, trades_loss=args.trades_loss, robust_loss=args.robust_loss, **lossparams)
 
     Dataloader = data.DataLoading(args.dataset, validontest, args.epochs, args.resize, args.run, args.number_workers, kaggle=args.kaggle)
-    Dataloader.create_transforms(args.train_aug_strat_orig, args.train_aug_strat_gen, args.RandomEraseProbability, args.grouped_stylization)
+    Dataloader.create_transforms(args.train_aug_strat_orig, args.train_aug_strat_gen, args.style_orig, args.style_gen, 
+                                 args.style_and_aug_orig, args.style_and_aug_gen, args.RandomEraseProbability, 
+                                 args.aggressive_soft_crop, args.stylization_first, args.minibatchsize, label_smoothing)    
     Dataloader.load_base_data(test_only=False)
 
     testsets_c = Dataloader.load_data_c(subset=True, subsetsize=1000, valid_run=True) if args.validonc else None
@@ -521,7 +540,9 @@ def trainable(config):
     criterion = losses.Criterion(args.loss, trades_loss=args.trades_loss, robust_loss=args.robust_loss, **lossparams)
 
     Dataloader = data.DataLoading(args.dataset, validontest, args.epochs, args.resize, args.run, args.number_workers, kaggle=args.kaggle)
-    Dataloader.create_transforms(args.train_aug_strat_orig, args.train_aug_strat_gen, args.RandomEraseProbability, args.grouped_stylization)
+    Dataloader.create_transforms(args.train_aug_strat_orig, args.train_aug_strat_gen, args.style_orig, args.style_gen, 
+                                 args.style_and_aug_orig, args.style_and_aug_gen, args.RandomEraseProbability, 
+                                 args.aggressive_soft_crop, args.stylization_first, args.minibatchsize)    
     Dataloader.load_base_data(test_only=False)
     
     #passing the testsets preloaded so that is not done over and over again
@@ -713,7 +734,9 @@ def pbt():
         }
     
     Dataloader = data.DataLoading(args.dataset, False, args.epochs, args.resize, args.run, args.number_workers, kaggle=args.kaggle)
-    Dataloader.create_transforms(args.train_aug_strat_orig, args.train_aug_strat_gen, args.RandomEraseProbability, args.grouped_stylization)
+    Dataloader.create_transforms(args.train_aug_strat_orig, args.train_aug_strat_gen, args.style_orig, args.style_gen, 
+                                 args.style_and_aug_orig, args.style_and_aug_gen, args.RandomEraseProbability, 
+                                 args.aggressive_soft_crop, args.stylization_first, args.minibatchsize)    
     Dataloader.load_base_data(test_only=False)
     testsets_c = Dataloader.load_data_c(subset=True, subsetsize=1000, valid_run=True) if args.validonc else None
     testsets_c_ref = ray.put(testsets_c) 

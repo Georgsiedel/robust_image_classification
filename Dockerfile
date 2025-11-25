@@ -12,7 +12,12 @@ RUN apt-get update && apt-get install -y \
     python3.11-distutils \
     python3.11-venv \
     git \
-    && apt-get clean
+    build-essential \
+    libpng-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
 
 # Create and activate a virtual environment for Python 3.11
 RUN python3.11 -m venv /opt/venv
@@ -41,7 +46,7 @@ RUN apt-get update && apt-get install -y libglib2.0-0
 RUN pip install -r /workspace/requirements.txt
 
 # Copy your repository code into the container
-COPY . /workspace/
+#COPY . /workspace/
 
 # Switch to that user
 USER appuser
