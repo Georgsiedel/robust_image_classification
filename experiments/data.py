@@ -326,7 +326,7 @@ class DataLoading():
 
             if self.dataset in ['ImageNet']:
                 self.testset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/val'),
-                                                                transform=transforms.Compose([self.transforms_preprocess_test]),
+                                                                transform=self.transforms_preprocess_test,
                                                                 loader=kornia.io.load_image)
                 if test_only:
                     self.base_trainset = None
@@ -697,8 +697,8 @@ class DataLoading():
                 if os.path.isdir(repo_path) and any(os.scandir(repo_path)):
                     random_corrupted_testset = torchvision.datasets.ImageFolder(
                         root=repo_path,
-                        transform=getattr(self.testset, "transform", None),
-                        loader=kornia.io.load_image
+                        loader=kornia.io.load_image,
+                        transform=self.transforms_preprocess_test
                     )
                     loaded_from_repo = True
                     break

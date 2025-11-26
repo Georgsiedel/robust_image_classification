@@ -340,7 +340,10 @@ if __name__ == '__main__':
     Dataloader.load_base_data(test_only=False)
     #updating soft_crop if given so that chance = 1 / num_classes (num_classes is loaded only upon base_data loading)
     Dataloader.update_transforms(aggressive_soft_crop=args.aggressive_soft_crop) 
-    testsets_c = Dataloader.load_data_c(subset=True, subsetsize=min(200, int(len(Dataloader.testset)/10)), valid_run=True) if args.validonc else None
+    testsets_c = (Dataloader.load_data_c(subset=True, 
+                                         subsetsize=min(200, int(len(Dataloader.testset)/10)), 
+                                         valid_run=True) 
+                    if args.validonc else None)
     
     # Construct model
     print(f'\nBuilding {args.modeltype} model with {args.modelparams} | Loss Function: {args.loss}, Stability Loss: {args.robust_loss}, Trades Loss: {args.trades_loss}')

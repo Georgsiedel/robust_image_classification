@@ -3,7 +3,7 @@ Standard_Acc;65,5172
 RMSCE;0,0608
 gaussian_noise;45,1724
 shot_noise;45,5172
-impulse_noise;51,0345
+impulse_noise;49,6552
 defocus_blur;55,1724
 glass_blur;44,8276
 motion_blur;60,6897
@@ -20,11 +20,11 @@ speckle_noise;47,5862
 gaussian_blur;43,7931
 spatter;58,6207
 saturate;48,6207
-blue_noise_sample;49,0744
-brownish_noise;48,9195
-caustic_refraction;9,7994
-checkerboard_cutout;33,4093
-cocentric_sine_waves;0,2537
+blue_noise_sample;49,0018
+brownish_noise;48,8276
+caustic_refraction;9,7829
+checkerboard_cutout;33,4047
+cocentric_sine_waves;0,2540
 inverse_sparkles;62,4138
 perlin_noise;61,3793
 plasma_noise;57,2414

@@ -120,6 +120,7 @@ def compute_c(loader_c, model, num_classes, criterion = None, multilabel = False
         uid_counter = 0
 
         for batch_idx, (inputs, targets) in enumerate(loader_c):
+
             inputs, targets = inputs.to(device, dtype=torch.float), targets.to(device)
             with torch.amp.autocast('cuda'):
                 
@@ -165,11 +166,9 @@ def compute_c(loader_c, model, num_classes, criterion = None, multilabel = False
                         class_dir = os.path.join(save_path, class_key)
                         os.makedirs(class_dir, exist_ok=True)
 
-                        # Unique file name
-                        filename = f"{uid_counter}.jpeg"
+                        filename = f"{uid_counter}.png"
                         uid_counter += 1
-
-                        img_pil.save(os.path.join(class_dir, filename), "JPEG")
+                        img_pil.save(os.path.join(class_dir, filename), "PNG")
 
         if multilabel:
             rmsce_c = float(calibration_metric(all_targets_pred.view(-1), all_targets.view(-1)).cpu())
