@@ -210,12 +210,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    for dataset in ['ImageNet-100']:
+    for dataset in ['Describable-Textures']:
         
-        for norm_distance in [2]:
-            if dataset in ['SynthiCAD'] and norm_distance in [2]:
-                print('skipping')
-                continue
+        for norm_distance in [np.inf, 1, 2]:
             #random seeding for reproducibility (this is only important should random preprocessing be used - 
             #here we use only deterministic test image preprocessing all around, so seed should not make a difference.)
             torch.manual_seed(0)

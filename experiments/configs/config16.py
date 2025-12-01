@@ -13,18 +13,18 @@ noise_patch_scale = {'lower': 0.2, 'upper': 0.7}
 combine_train_corruptions = True #augment the train dataset with all corruptions
 concurrent_combinations = 1 #only has an effect if combine_train_corruption is True
 
-batchsize = 64
+batchsize = 256
 minibatchsize = 8
 #ImageNet ImageNet-100 TreeSAT Describable-Textures Flickr-Material KITTI_RoadLane KITTI_Distance_Multiclass 
 # CIFAR100 CIFAR10 TinyImageNet PCAM GTSRB WaferMap EuroSAT SynthiCAD
-dataset = 'KITTI_RoadLane'
+dataset = 'TreeSAT' 
 generated_ratio = 0.0
 normalize = True
 validontest = True
 validonc = True
 validonadv = False
 lrschedule = 'CosineAnnealingWarmRestarts'
-learningrate = 0.01
+learningrate = 0.1
 epochs = 300
 lrparams = {'T_0': 20, 'T_mult': 2}
 warmupepochs = 0

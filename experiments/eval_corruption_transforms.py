@@ -1357,7 +1357,6 @@ class BlueNoiseSample(Transform):
         mask = noise > threshold
         out = image * mask.reshape(self.im_size, self.im_size, 1)
 
-
         return np.clip(out, 0, 255).astype(np.uint8)
 
 class CausticRefraction(Transform):

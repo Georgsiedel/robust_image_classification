@@ -3,7 +3,7 @@ Standard_Acc;98,6584
 RMSCE;0,0403
 gaussian_noise;53,7288
 shot_noise;84,3088
-impulse_noise;70,9983
+impulse_noise;71,4981
 defocus_blur;4,3667
 glass_blur;16,7565
 motion_blur;7,3392
@@ -30,8 +30,8 @@ pinch_and_twirl;3,2882
 ripple;9,4042
 sparkles;25,3847
 transverse_chromatic_abberation;28,3441
-Acc_C-all-19;33,6148
-Acc_C-original-15;26,3300
+Acc_C-all-19;33,6412
+Acc_C-original-15;26,3633
 Acc_C-bar-10;26,3146
 Acc_all-ex-pixelwise-noise-24;23,9763
 RMSCE_C;0,1451

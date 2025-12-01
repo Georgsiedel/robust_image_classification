@@ -14,7 +14,7 @@ import numpy as np
 import experiments.custom_transforms as custom_transforms
 from run_0 import device
 from experiments.utils import plot_images, CsvHandler
-from experiments.custom_datasets import SubsetWithTransform, NumpyDataset, AugmentedDataset, HDF5ImageDataset, CustomDataset 
+from experiments.custom_datasets import SubsetWithTransform, NumpyDataset, AugmentedDataset, HDF5ImageDataset, CustomDataset, NumericFolderKorniaDataset
 from experiments.custom_datasets import BalancedRatioSampler, BasicAugmentedDataset, StyleDataset
 
 def normalization_values(batch, dataset, normalized, manifold=False, manifold_factor=1, verbose=False):
@@ -208,12 +208,17 @@ class DataLoading():
         # transformations of validation/test set and necessary transformations for training
         # always done (even for clean images while training, when using robust loss)
         if self.dataset in ['ImageNet', 'ImageNet-100', 'TreeSAT', 'Casting-Product-Quality', 
-                       'Describable-Textures', 'Flickr-Material', 'SynthiCAD']:
+                       'Describable-Textures', 'Flickr-Material']:
             #see https://pytorch.org/blog/how-to-train-state-of-the-art-models-using-torchvision-latest-primitives/ for FixRes recipe
             #no tensor because HDF5 dataset class or Imagefolder with kornia loader (tensor output)
             self.transforms_preprocess_train = transforms.Compose([rrc176]) #rrc224 rrc176
             self.transforms_preprocess_test = transforms.Compose([r232, cc224])
-
+        elif self.dataset in ['SynthiCAD']:
+            #no tensor because HDF5 dataset class or Imagefolder with kornia loader (tensor output)
+            self.transforms_preprocess_train = transforms.Compose([rrc176, 
+                                                        custom_transforms.ExpandGrayscaleTensorTo3Channels()]) #rrc224 rrc176
+            self.transforms_preprocess_test = transforms.Compose([r232, cc224, 
+                                                        custom_transforms.ExpandGrayscaleTensorTo3Channels()])
         elif self.dataset in ['KITTI_RoadLane', 'KITTI_Distance_Multiclass']: #no tensor because HDF5 dataset class
             self.transforms_preprocess_train = transforms.Compose([r320])
             self.transforms_preprocess_test = transforms.Compose([r384])
@@ -583,8 +588,7 @@ class DataLoading():
                                                 mmap_mode='r') 
                         self.generated_dataset_length = len(self.generated_dataset['label'])
                     else:
-                        self.generated_dataset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}_GAN'),
-                                                                        loader=kornia.io.load_image)
+                        self.generated_dataset = NumericFolderKorniaDataset(root=os.path.abspath(f'{self.data_path}/{self.dataset}_GAN'))
                         self.generated_dataset_length = len(self.generated_dataset)
                     self.generated_ratio = generated_ratio
                 except:
@@ -695,10 +699,15 @@ class DataLoading():
 
             for repo_path in base_paths:
                 if os.path.isdir(repo_path) and any(os.scandir(repo_path)):
-                    random_corrupted_testset = torchvision.datasets.ImageFolder(
+                    
+                    class_to_idx = {
+                        folder: int(folder)
+                        for folder in os.listdir(repo_path)
+                        if os.path.isdir(os.path.join(repo_path, folder))
+                    }
+                    random_corrupted_testset = NumericFolderKorniaDataset(
                         root=repo_path,
-                        loader=kornia.io.load_image,
-                        transform=self.transforms_preprocess_test
+                        transform=self.transforms_preprocess_test,
                     )
                     loaded_from_repo = True
                     break

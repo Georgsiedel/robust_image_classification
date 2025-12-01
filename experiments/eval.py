@@ -155,19 +155,12 @@ if __name__ == '__main__':
                 subset = False if args.validontest else True
                 subsetsize = None if args.validontest else 1000 #subset for quick validation runs
                 
-                if args.dataset in ['TreeSAT', 'Describable-Textures', 'Flickr-Material', 'KITTI_RoadLane',
-                                    'KITTI_Distance_Multiclass', 'PCAM', 'GTSRB', 'WaferMap', 'EuroSAT',
-                                      'SynthiCAD', 'Casting-Product-Quality']:
-                    root = "../data"
-                else:
-                    root = None
-                
                 subsetsize = 5000 if args.validontest else 1000
                 testsets_c = Dataloader.load_data_c(subset=subset, subsetsize=subsetsize, valid_run=False,
-                                                    load_root=None)
+                                                    load_root="../data")
                 accs_c = eval_corruptions.compute_c_corruptions(args.dataset, testsets_c, model, args.batchsize, Dataloader.num_classes, 
                                                                 valid_run=False, workers=workers, multilabel=Dataloader.multilabel,
-                                                                save_root=root)[0]
+                                                                save_root=None)[0]
                 Testtracker.track_results(accs_c, i)
 
             if args.calculate_adv_distance == True:  # adversarial distance calculation

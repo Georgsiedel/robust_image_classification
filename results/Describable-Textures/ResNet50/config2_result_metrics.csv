@@ -3,7 +3,7 @@ Standard_Acc;35,2837
 RMSCE;0,1504
 gaussian_noise;19,9468
 shot_noise;20,1241
-impulse_noise;18,3511
+impulse_noise;18,9716
 defocus_blur;15,6028
 glass_blur;14,3617
 motion_blur;22,2518
@@ -30,11 +30,11 @@ perlin_noise;20,9220
 plasma_noise;11,8794
 single_frequency_greyscale;18,0851
 sparkles;32,4468
-Acc_C-all-19;18,9530
-Acc_C-original-15;18,4634
+Acc_C-all-19;18,9856
+Acc_C-original-15;18,5047
 Acc_C-bar-10;22,1277
 Acc_all-ex-pixelwise-noise-24;19,9542
-RMSCE_C;0,2341
+RMSCE_C;0,2339
 uniform-l0-impulse,0.01,True,max;33,4220
 uniform-l0-impulse,0.02,True,max;30,9397
 uniform-l0-impulse,0.05,True,max;25,5319

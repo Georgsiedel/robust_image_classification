@@ -29,7 +29,6 @@ def compute_p_corruptions(testloader, model, test_corruptions, dataset):
         for batch_idx, (inputs, targets) in enumerate(testloader):
             inputs, targets = inputs.to(device, dtype=torch.float), targets.to(device)
             inputs_pert = apply_noise(inputs, 8, test_corruptions, 1, False, dataset)
-            #plot_images(inputs_pert, inputs_pert, 3)
 
             with torch.amp.autocast('cuda'):
                 targets_pred = model(inputs_pert)
@@ -121,6 +120,10 @@ def compute_c(loader_c, model, num_classes, criterion = None, multilabel = False
 
         for batch_idx, (inputs, targets) in enumerate(loader_c):
 
+            #plot_images(5, 
+            #            torch.tensor([0.0,0.0,0.0]).view(1, 3, 1, 1), 
+            #            torch.tensor([1.0,1.0,1.0]).view(1, 3, 1, 1),
+            #            inputs, targets)
             inputs, targets = inputs.to(device, dtype=torch.float), targets.to(device)
             with torch.amp.autocast('cuda'):
                 
@@ -149,26 +152,30 @@ def compute_c(loader_c, model, num_classes, criterion = None, multilabel = False
             if save_root is not None:
                 batch_cpu = inputs.cpu()
                 for i in range(batch_cpu.size(0)):
-                        img_tensor = batch_cpu[i]
+                    img_tensor = batch_cpu[i]
 
-                        # torchvision tensor → PIL
-                        img_pil = Image.fromarray(
-                            (img_tensor.permute(1, 2, 0).clamp(0, 1).numpy() * 255).astype("uint8")
-                        )
+                    # torchvision tensor → PIL
+                    img_array = (img_tensor.permute(1, 2, 0).clamp(0, 1).numpy() * 255).astype("uint8")
+                    
+                    if img_array.shape[2] == 1:  # grayscale image
+                        img_array = img_array.squeeze(2)  # H,W
+                        img_pil = Image.fromarray(img_array, mode="L")
+                    else:
+                        img_pil = Image.fromarray(img_array)
 
-                        # Determine class folder
-                        if multilabel:
-                            # Example: multilabel class folder "0_0_1_0_1_0_0_1"
-                            class_key = "_".join(str(int(x)) for x in targets[i].tolist())
-                        else:
-                            class_key = str(int(targets[i].item()))
+                    # Determine class folder
+                    if multilabel:
+                        # Example: multilabel class folder "0_0_1_0_1_0_0_1"
+                        class_key = "_".join(str(int(x)) for x in targets[i].tolist())
+                    else:
+                        class_key = str(int(targets[i].item()))
 
-                        class_dir = os.path.join(save_path, class_key)
-                        os.makedirs(class_dir, exist_ok=True)
+                    class_dir = os.path.join(save_path, class_key)
+                    os.makedirs(class_dir, exist_ok=True)
 
-                        filename = f"{uid_counter}.png"
-                        uid_counter += 1
-                        img_pil.save(os.path.join(class_dir, filename), "PNG")
+                    filename = f"{uid_counter}.png"
+                    uid_counter += 1
+                    img_pil.save(os.path.join(class_dir, filename), "PNG")
 
         if multilabel:
             rmsce_c = float(calibration_metric(all_targets_pred.view(-1), all_targets.view(-1)).cpu())

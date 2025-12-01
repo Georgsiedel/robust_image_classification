@@ -7,7 +7,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 if __name__ == '__main__':
 
-    for experiment in [1,2,3,4,5,7,8,10,11]:#
+    for experiment in [8,7,4]:#
 
         configname = (f'experiments.configs.config{experiment}')
         config = importlib.import_module(configname)
@@ -46,7 +46,7 @@ if __name__ == '__main__':
                     f"\"{config.noise_patch_scale}\" --generated_ratio={config.generated_ratio} " \
                     f"--n2n_deepaugment={config.n2n_deepaugment} --stylization_first={stylization_first} " \
                     f"--kaggle={kaggle} "
-            if experiment in [1,2,3,4,5,7,8,10,11]:
+            if experiment in []:
                 print('skip')
             else:
                 os.system(cmd0)

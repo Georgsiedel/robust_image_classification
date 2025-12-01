@@ -10,6 +10,8 @@ from run_0 import device
 import io
 import json
 import h5py
+import kornia
+
 
 def custom_collate_fn(batch, batch_transform_orig, batch_transform_gen, image_transform_orig, 
                       image_transform_gen, generated_ratio, batchsize):
@@ -51,7 +53,59 @@ class SwaLoader():
         )
 
         return swa_dataloader
-    
+
+class NumericFolderKorniaDataset(Dataset):
+    """
+    A drop-in replacement for ImageFolder where subfolder names are numeric
+    class IDs, and labels are kept exactly as those integers.
+    Uses kornia.io.load_image for loading.
+    """
+
+    def __init__(self, root, transform=None):
+        self.root = root
+        self.transform = transform
+        self.samples = []
+        self.classes = []
+        self.class_to_idx = {}
+
+        # Iterate through subdirectories
+        for folder in os.listdir(root):
+            folder_path = os.path.join(root, folder)
+            if not os.path.isdir(folder_path):
+                continue
+
+            # Convert folder name to integer label
+            try:
+                class_id = int(folder)
+            except ValueError:
+                raise ValueError(f"Folder name '{folder}' is not a valid integer class label.")
+
+            self.classes.append(class_id)
+            self.class_to_idx[folder] = class_id
+
+            # Gather image paths
+            for fname in os.listdir(folder_path):
+                if fname.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".tiff")):
+                    img_path = os.path.join(folder_path, fname)
+                    self.samples.append((img_path, class_id))
+
+        # Sort by class ID for deterministic behavior
+        self.classes = sorted(self.classes)
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+
+        # Load image with Kornia
+        img = kornia.io.load_image(path, kornia.io.ImageLoadType.RGB32)
+
+        if self.transform:
+            img = self.transform(img)
+
+        return img, label
+
 class NumpyDataset(Dataset):
     def __init__(self, images, labels, transform=None):
         self.images = images
@@ -229,6 +283,8 @@ class HDF5ImageDataset(Dataset):
         else: #convert directly to torch tensor
             t = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.float32, scale=True)])
             img = t(img)
+            if img.ndim == 2:  # H,W in case of grayscale
+                img = img.unsqueeze(0)  # 1,H,W
 
         if self.transform is not None:
             img = self.transform(img)

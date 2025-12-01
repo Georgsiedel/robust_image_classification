@@ -82,12 +82,23 @@ def build_command_from_config(config_module, additional_params, base_cmd):
 
     return " ".join(cmd_parts)
 
-def plot_images(number, mean, std, images, corrupted_images = None, second_corrupted_images = None):
+def plot_images(
+    number,
+    mean,
+    std,
+    images,
+    labels=None,
+    corrupted_images=None,
+    second_corrupted_images=None
+):
+    # Convert images back from normalized space
     images = images * std + mean
-    
-    # Define a consistent figure size for each row of images
-    row_height = 1.0  # Height per row
-    col_width = 1.0   # Width per column
+
+    # Default labels if none provided
+    if labels is None:
+        labels = [""] * number
+
+    # Determine number of columns
     columns = 1
     if corrupted_images is not None:
         corrupted_images = corrupted_images * std + mean
@@ -95,35 +106,47 @@ def plot_images(number, mean, std, images, corrupted_images = None, second_corru
         if second_corrupted_images is not None:
             second_corrupted_images = second_corrupted_images * std + mean
             columns = 3
-    fig, axs = plt.subplots(number, columns, figsize=(2 * col_width, number * row_height), squeeze=False)
-    
+
+    # Grid figure
+    fig, axs = plt.subplots(
+        number,
+        columns,
+        figsize=(2 * columns, number * 2),
+        squeeze=False
+    )
+
+    # Move tensors to CPU
     images = images.cpu()
-    corrupted_images = corrupted_images.cpu() if corrupted_images is not None else corrupted_images
-    second_corrupted_images = second_corrupted_images.cpu() if second_corrupted_images is not None else second_corrupted_images
-    
+    corrupted_images = corrupted_images.cpu() if corrupted_images is not None else None
+    second_corrupted_images = (
+        second_corrupted_images.cpu() if second_corrupted_images is not None else None
+    )
+
+    # Plot each row
     for i in range(number):
-        image = images[i]
-        image = torch.squeeze(image)
-        image = image.permute(1, 2, 0)
-        axs[i, 0].imshow(image)
-        axs[i, 0].axis('off')  # Turn off axes for cleaner visualization
-        
+        # original image
+        img = images[i].squeeze().permute(1, 2, 0)
+        axs[i, 0].imshow(img)
+        #axs[i, 0].axis('off')
+        axs[i, 0].set_xlabel(labels[i].item(), fontsize=10)
+
+        # corrupted images
         if corrupted_images is not None:
-            corrupted_image = corrupted_images[i]
-            corrupted_image = torch.squeeze(corrupted_image)
-            corrupted_image = corrupted_image.permute(1, 2, 0)
-            axs[i, 1].imshow(corrupted_image)
-            axs[i, 1].axis('off')  # Turn off axes for cleaner visualization
-        
+            cimg = corrupted_images[i].squeeze().permute(1, 2, 0)
+            axs[i, 1].imshow(cimg)
+            #axs[i, 1].axis('off')
+            axs[i, 1].set_xlabel(labels[i].item(), fontsize=10)
+
         if second_corrupted_images is not None:
-            second_corrupted_image = second_corrupted_images[i]
-            second_corrupted_image = torch.squeeze(second_corrupted_image)
-            second_corrupted_image = second_corrupted_image.permute(1, 2, 0)
-            axs[i, 2].imshow(second_corrupted_image)
-            axs[i, 2].axis('off')  # Turn off axes for cleaner visualization
+            cimg2 = second_corrupted_images[i].squeeze().permute(1, 2, 0)
+            axs[i, 2].imshow(cimg2)
+            #axs[i, 2].axis('off')
+            axs[i, 2].set_xlabel(labels[i].item(), fontsize=10)
 
     plt.tight_layout()  # Adjust layout to prevent overlapping
+    plt.savefig(f"./corruption_examples.png")  # Save the figure
     plt.show()
+    plt.close()
 
 def calculate_steps(trainset, validset, batchsize, epochs, start_epoch, warmupepochs, validonc, swa, swa_start_factor):
     #+0.5 is a way of rounding up to account for the last partial batch in every epoch

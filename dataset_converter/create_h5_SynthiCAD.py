@@ -63,7 +63,7 @@ def find_image_files_flat(root):
 def image_to_npy_bytes(path):
     """Open image, convert to RGB numpy array, serialize as .npy bytes and return bytes."""
     with Image.open(path) as img:
-        arr = np.asarray(img.convert("RGB"), dtype=np.uint8)  # H,W,3 uint8
+        arr = np.asarray(img.convert("L"), dtype=np.uint8)  # H,W,3 uint8
     buf = io.BytesIO()
     np.save(buf, arr, allow_pickle=False)
     return buf.getvalue()
@@ -99,8 +99,8 @@ def main(args):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default="../data/SynthiCAD/Train_Dataset/images", help="ImageFolder root")
-    ap.add_argument("--out", default="../data/SynthiCAD/SynthiCAD_train.h5", help="Output HDF5 file path")
+    ap.add_argument("--src", default="../data/SynthiCAD/Valid_Dataset/images", help="ImageFolder root")
+    ap.add_argument("--out", default="../data/SynthiCAD/SynthiCAD_valid.h5", help="Output HDF5 file path")
     ap.add_argument("--compression", action="store_true", help="Use LZF compression for the dataset (fast).")
     args = ap.parse_args()
     main(args)

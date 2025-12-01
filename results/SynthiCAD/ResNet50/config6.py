@@ -19,13 +19,13 @@ minibatchsize = 8
 # CIFAR100 CIFAR10 TinyImageNet PCAM GTSRB WaferMap EuroSAT SynthiCAD
 dataset = 'SynthiCAD' 
 generated_ratio = 0.0
-normalize = True
+normalize = False
 validontest = True
-validonc = True
+validonc = False
 validonadv = False
 lrschedule = 'CosineAnnealingWarmRestarts'
-learningrate = 0.1
-epochs = 300
+learningrate = 0.005
+epochs = 60
 lrparams = {'T_0': 20, 'T_mult': 2}
 warmupepochs = 0
 earlystop = False
