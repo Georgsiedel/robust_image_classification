@@ -84,12 +84,13 @@ def build_command_from_config(config_module, additional_params, base_cmd):
 
 def plot_images(
     number,
-    mean,
-    std,
     images,
+    mean=0.0,
+    std=1.0,
     labels=None,
     corrupted_images=None,
-    second_corrupted_images=None
+    second_corrupted_images=None,
+    save=False
 ):
     # Convert images back from normalized space
     images = images * std + mean
@@ -111,7 +112,7 @@ def plot_images(
     fig, axs = plt.subplots(
         number,
         columns,
-        figsize=(2 * columns, number * 2),
+        figsize=(6 * columns, number * 2),
         squeeze=False
     )
 
@@ -128,23 +129,24 @@ def plot_images(
         img = images[i].squeeze().permute(1, 2, 0)
         axs[i, 0].imshow(img)
         #axs[i, 0].axis('off')
-        axs[i, 0].set_xlabel(labels[i].item(), fontsize=10)
+        axs[i, 0].set_xlabel(labels[i], fontsize=10)
 
         # corrupted images
         if corrupted_images is not None:
             cimg = corrupted_images[i].squeeze().permute(1, 2, 0)
             axs[i, 1].imshow(cimg)
             #axs[i, 1].axis('off')
-            axs[i, 1].set_xlabel(labels[i].item(), fontsize=10)
+            axs[i, 1].set_xlabel(labels[i], fontsize=10)
 
         if second_corrupted_images is not None:
             cimg2 = second_corrupted_images[i].squeeze().permute(1, 2, 0)
             axs[i, 2].imshow(cimg2)
             #axs[i, 2].axis('off')
-            axs[i, 2].set_xlabel(labels[i].item(), fontsize=10)
+            axs[i, 2].set_xlabel(labels[i], fontsize=10)
 
     plt.tight_layout()  # Adjust layout to prevent overlapping
-    plt.savefig(f"./corruption_examples.png")  # Save the figure
+    if save:
+        plt.savefig(f"./corruption_examples.png")  # Save the figure
     plt.show()
     plt.close()
 
@@ -273,15 +275,16 @@ class Checkpoint:
             filtered_state_dict = {k: v for k, v in checkpoint["model_state_dict"].items() if "deepaugment_instance" not in k}
             model.load_state_dict(filtered_state_dict, strict=True)
             start_epoch = checkpoint['epoch'] + 1
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         elif type == 'best':
             filtered_state_dict = {k: v for k, v in checkpoint["best_model_state_dict"].items() if "deepaugment_instance" not in k}
             model.load_state_dict(filtered_state_dict, strict=True)
             start_epoch = checkpoint['best_epoch'] + 1
+            optimizer.load_state_dict(checkpoint['best_optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['best_scheduler_state_dict'])
         else:
             print('only best_checkpoint or checkpoint can be loaded')
-
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         if pbt == True:
             history = checkpoint.get('history', [])
@@ -289,9 +292,14 @@ class Checkpoint:
             history = []
 
         if swa_model != None:
-            swa_filtered_state_dict = {k: v for k, v in checkpoint["swa_model_state_dict"].items() if "deepaugment_instance" not in k}
-            swa_model.load_state_dict(swa_filtered_state_dict, strict=True)
-            swa_scheduler.load_state_dict(checkpoint['swa_scheduler_state_dict'])
+            if type == 'standard':
+                swa_filtered_state_dict = {k: v for k, v in checkpoint["swa_model_state_dict"].items() if "deepaugment_instance" not in k}
+                swa_model.load_state_dict(swa_filtered_state_dict, strict=True)
+                swa_scheduler.load_state_dict(checkpoint['swa_scheduler_state_dict'])
+            elif type == 'best':
+                swa_filtered_state_dict = {k: v for k, v in checkpoint["best_swa_model_state_dict"].items() if "deepaugment_instance" not in k}
+                swa_model.load_state_dict(swa_filtered_state_dict, strict=True)
+                swa_scheduler.load_state_dict(checkpoint['best_swa_scheduler_state_dict'])
 
         return start_epoch, model, swa_model, optimizer, scheduler, swa_scheduler, history
 
@@ -313,6 +321,10 @@ class Checkpoint:
                 'swa_scheduler_state_dict': swa_scheduler,
                 'best_epoch': epoch,
                 'best_model_state_dict': model.state_dict(),
+                'best_optimizer_state_dict': optimizer.state_dict(),
+                'best_scheduler_state_dict': scheduler.state_dict(),
+                'best_swa_model_state_dict': swa_model,
+                'best_swa_scheduler_state_dict': swa_scheduler,
             }, self.checkpoint_path)
 
         else:
@@ -512,11 +524,14 @@ class TestTracking:
 
         self.test_count = 2
         if test_on_c:
-            self.test_count += 34
+            if dataset in ['KITTI_RoadLane', 'KITTI_Distance_Multiclass']:
+                self.test_count += 24
+            else:
+                self.test_count += 34
         if combine_test_corruptions:
             self.test_count += 1
         else:
-            self.test_count += test_corruptions.shape[0]
+            self.test_count += test_corruptions.shape[0] + 3
         if calculate_adv_distance:
             self.adv_count = len(self.adv_distance_params["norm"]) * (2+len(self.adv_distance_params["clever_samples"])) + 1
             self.test_count += self.adv_count
@@ -556,11 +571,12 @@ class TestTracking:
                 test_corruptions_label = np.loadtxt(os.path.abspath(f'{self.c_labels_path}/c-labels.txt'), dtype=list)
                 if self.dataset in ['CIFAR10', 'CIFAR100', 'GTSRB', 'WaferMap']:
                     test_corruptions_bar_label = np.loadtxt(os.path.abspath(f'{self.c_labels_path}/c-bar-labels-cifar.txt'), dtype=list)
-                elif self.dataset in ['ImageNet', 'ImageNet-100', 'TinyImageNet', 'EuroSAT', 'PCAM', 'KITTI_RoadLane', 'SynthiCAD',
-                       'KITTI_Distance_Multiclass', 'TreeSAT', 'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material']:
+                elif self.dataset in ['ImageNet', 'ImageNet-100', 'TinyImageNet', 'EuroSAT', 'PCAM', 'SynthiCAD',
+                       'TreeSAT', 'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material']:
                     test_corruptions_bar_label = np.loadtxt(os.path.abspath(f'{self.c_labels_path}/c-bar-labels-IN.txt'), dtype=list)
                 else:
                     print('no c-bar corruption types defined for this dataset')
+                    test_corruptions_bar_label = []
                 test_metrics_string = np.append(test_metrics_string, test_corruptions_label, axis=0)
                 test_metrics_string = np.append(test_metrics_string, test_corruptions_bar_label, axis=0)
                 test_metrics_string = np.append(test_metrics_string,
@@ -583,7 +599,10 @@ class TestTracking:
                 test_metrics_string = np.append(test_metrics_string, ['Combined_Noise'])
             else:
                 test_corruptions_labels = np.array([','.join(map(str, row.values())) for row in self.test_corruptions])
-                test_metrics_string = np.append(test_metrics_string, test_corruptions_labels)
+                test_metrics_string = np.concatenate([test_metrics_string, 
+                                                      test_corruptions_labels, 
+                                                      np.array(['Class Separation Robustness', 'imperceptible Robustness', 'Average p-norm robustness'])], 
+                                                      axis=0)
 
             report_frame = pd.DataFrame(test_metrics, index=test_metrics_string,
                                             columns=column_string)

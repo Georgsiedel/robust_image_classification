@@ -111,9 +111,9 @@ def compute_c(loader_c, model, num_classes, criterion = None, multilabel = False
             if corruption_name in ['gaussian_noise','shot_noise','impulse_noise','pixelate','jpeg_compression','defocus_blur',
                                    'glass_blur','motion_blur','zoom_blur','elastic_transform','speckle_noise','gaussian_blur',
                                    'fog','frost','snow','spatter','brightness','contrast','saturate']:
-                save_path = os.path.join(save_root, f"{dataset_name}-c/{corruption_name}")
+                save_path = os.path.join(save_root, f"{dataset_name}-c-valid_0/{corruption_name}")
             else:
-                save_path = os.path.join(save_root, f"{dataset_name}-c-bar/{corruption_name}")
+                save_path = os.path.join(save_root, f"{dataset_name}-c-bar-valid_0/{corruption_name}")
             os.makedirs(save_root, exist_ok=True)
 
         uid_counter = 0
@@ -133,19 +133,18 @@ def compute_c(loader_c, model, num_classes, criterion = None, multilabel = False
                     loss_c += loss.item()
             
             avg_test_loss_c = loss_c / (batch_idx + 1)
-            
-            if multilabel:
-                predicted = (targets_pred > 0.5).float() 
-            else:  
-                _, predicted = targets_pred.max(1)
 
             total += targets.size(0)
+
             if multilabel:
+                predicted = (torch.sigmoid(targets_pred) > 0.5).float()
                 matches = predicted.eq(targets)  # shape: [batch_size, num_labels]
                 exact_match = matches.all(dim=1)  # shape: [batch_size], bool tensor
                 correct += exact_match.sum().item()
             else:
+                _, predicted = targets_pred.max(1)
                 correct += predicted.eq(targets).sum().item()
+            
             all_targets = torch.cat((all_targets, targets), 0)
             all_targets_pred = torch.cat((all_targets_pred, targets_pred), 0)
 

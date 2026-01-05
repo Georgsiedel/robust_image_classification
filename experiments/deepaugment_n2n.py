@@ -21,11 +21,220 @@ import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 import random
+import math
 
 class N2N_DeepAugment(nn.Module):
-    def __init__(self, orig_batch_size, image_size, channels, noisenet_max_eps=0.75, ratio=0.5):
+    def __init__(self, orig_batch_size, image_size, channels, noisenet_max_eps=0.75, ratio=0.5, overlap=32):
         super(N2N_DeepAugment, self).__init__()
+        self.image_size = image_size
+        self.channels = channels
+        self.ratio = ratio
+        self.overlap = overlap
+        self.noisenet_max_eps = noisenet_max_eps
+
+        # initial guess; can be updated dynamically
+        self.noise2net_batch_size = max(1, int(orig_batch_size * ratio))
+        self.noise2net = Res2Net(epsilon=0.5, hidden_planes=16, batch_size=self.noise2net_batch_size).train()
+        # note: network will be moved to device on-first-use via .to(device)
+
+        # patching constants (match style-transfer)
+        self.patch_size = 224
+        self.stride = self.patch_size - self.overlap
+
+    def _use_net_for_chunk(self, chunk: torch.Tensor, device: torch.device):
+        """
+        chunk: [M, C, 224,224] already on device
+        Return: [M, C, 224,224] on device (augmented)
+        Uses the configured self.noise2net if M == self.noise2net_batch_size, otherwise
+        creates a temporary Res2Net for M.
+        NOTE: chunk should be detached by caller (no grad).
+        """
+        M = chunk.shape[0]
+        C = chunk.shape[1]
+        assert C == self.channels, f"Channel mismatch {C} vs {self.channels}"
+
+        if M == 0:
+            return chunk
+
+        # Ensure the net(s) are on the right device
+        if M == self.noise2net_batch_size:
+            net = self.noise2net
+            if next(net.parameters()).device != device:
+                net = net.to(device)
+            net.reload_parameters()
+            net.set_epsilon(random.uniform(self.noisenet_max_eps / 2.0, self.noisenet_max_eps))
+            # chunk is expected to be detached already
+            inp = chunk.reshape(1, M * C, self.patch_size, self.patch_size)
+            out = net(inp)
+            out = out.reshape(M, C, self.patch_size, self.patch_size)
+            return out
+        else:
+            temp_net = Res2Net(epsilon=0.5, hidden_planes=16, batch_size=M).train().to(device)
+            temp_net.reload_parameters()
+            temp_net.set_epsilon(random.uniform(self.noisenet_max_eps / 2.0, self.noisenet_max_eps))
+            inp = chunk.reshape(1, M * C, self.patch_size, self.patch_size)
+            out = temp_net(inp)
+            out = out.reshape(M, C, self.patch_size, self.patch_size)
+            try:
+                del temp_net
+            except Exception:
+                pass
+            return out
+
+    def forward(self, bx):
+        """
+        bx: [B, C, H, W]
+        All augmentation (including writes into bx) performed under torch.no_grad()
+        to avoid creating autograd history and to prevent inplace-on-view errors.
+        """
+        batchsize = bx.shape[0]
+        device = bx.device
+        C = bx.shape[1]
+
+        if C != self.channels:
+            raise ValueError(f"Input channels {C} != configured channels {self.channels}")
+
+        # deterministic selection per original DeepAugment semantics
+        target_count = int(batchsize * self.ratio)
+        if target_count <= 0:
+            return bx
+
+        # run entire augmentation under no_grad to avoid autograd/view conflicts
+        with torch.no_grad():
+            # indices to augment
+            indices = torch.randperm(batchsize, device=device)[:target_count].tolist()
+
+            # Fast path: all selected images are already exactly 224x224
+            single_shape_fast = True
+            for idx in indices:
+                _, H, W = bx[idx].shape
+                if H != self.patch_size or W != self.patch_size:
+                    single_shape_fast = False
+                    break
+
+            if single_shape_fast:
+                selected_x = bx[indices].to(device)  # [N, C, 224,224]
+                N = selected_x.shape[0]
+                out_chunks = []
+                ptr = 0
+
+                while ptr < N:
+                    chunk_size = min(self.noise2net_batch_size, N - ptr)
+                    chunk = selected_x[ptr:ptr + chunk_size].detach()  # ensure detached
+                    out_chunk = self._use_net_for_chunk(chunk, device)
+                    out_chunks.append(out_chunk)
+                    ptr += chunk_size
+
+                out = torch.cat(out_chunks, dim=0)
+                bx[indices] = out.to(bx.dtype)  # write back inside no_grad — safe
+                return bx
+
+            # Else: patching path (CPU extraction)
+            selected_x = bx[indices].cpu()  # [R, C, H, W] on CPU
+            metas_selected = []
+            patches_to_process = []
+            patches_per_selected_image = []
+            selected_image_order = indices[:]
+
+            for r, img in enumerate(selected_x):
+                _, H, W = img.shape
+                orig_H, orig_W = int(H), int(W)
+                scale = 224.0 / float(min(H, W))
+                new_H = int(round(H * scale))
+                new_W = int(round(W * scale))
+                img_resized = TF.resize(img.unsqueeze(0), size=[new_H, new_W], interpolation=TF.InterpolationMode.BILINEAR).squeeze(0)
+
+                num_h = max(1, math.ceil((new_H - self.overlap) / self.stride))
+                num_w = max(1, math.ceil((new_W - self.overlap) / self.stride))
+                num_patches = int(num_h * num_w)
+                metas_selected.append((selected_image_order[r], orig_H, orig_W, new_H, new_W, int(num_h), int(num_w), int(num_patches)))
+
+                cnt = 0
+                for i in range(num_h):
+                    for j in range(num_w):
+                        top = min(int(i * self.stride), max(0, new_H - self.patch_size))
+                        left = min(int(j * self.stride), max(0, new_W - self.patch_size))
+                        patch = img_resized[:, top:top + self.patch_size, left:left + self.patch_size]  # [C,224,224]
+                        patches_to_process.append(patch)
+                        cnt += 1
+                patches_per_selected_image.append(cnt)
+
+            if len(patches_to_process) == 0:
+                return bx
+
+            patches_tensor_cpu = torch.stack(patches_to_process, dim=0)  # [N_proc, C, 224,224] on CPU
+            N_proc = patches_tensor_cpu.shape[0]
+
+            processed_patches_list = []
+            ptr = 0
+            while ptr < N_proc:
+                chunk_size = min(self.noise2net_batch_size, N_proc - ptr)
+                chunk_cpu = patches_tensor_cpu[ptr:ptr + chunk_size]
+                # move to device and detach to ensure no grad/history
+                chunk = chunk_cpu.to(device).detach()
+                out_chunk = self._use_net_for_chunk(chunk, device)  # device tensor
+                processed_patches_list.append(out_chunk.cpu())
+                ptr += chunk_size
+
+            stylized_patches_proc = torch.cat(processed_patches_list, dim=0)  # [N_proc, C,224,224] on CPU
+
+            # Reconstruct images on CPU and write back to bx (on device) inside no_grad
+            proc_ptr = 0
+            for meta in metas_selected:
+                img_idx, orig_H, orig_W, new_H, new_W, num_h, num_w, num_patches = meta
+
+                recon = torch.zeros((self.channels, new_H, new_W), dtype=torch.float32)
+                weight = torch.zeros_like(recon)
+
+                for i in range(num_h):
+                    for j in range(num_w):
+                        top = min(int(i * self.stride), max(0, new_H - self.patch_size))
+                        left = min(int(j * self.stride), max(0, new_W - self.patch_size))
+
+                        if proc_ptr >= stylized_patches_proc.shape[0]:
+                            raise RuntimeError("Processed patches exhausted unexpectedly.")
+
+                        patch = stylized_patches_proc[proc_ptr]  # [C,224,224] CPU
+                        proc_ptr += 1
+
+                        mask_y = torch.linspace(0, 1, self.patch_size).unsqueeze(1).repeat(1, self.patch_size)
+                        mask_x = torch.linspace(0, 1, self.patch_size).unsqueeze(0).repeat(self.patch_size, 1)
+
+                        mask_h = torch.ones_like(mask_y)
+                        mask_w = torch.ones_like(mask_x)
+
+                        if i > 0:
+                            mask_h[:self.overlap, :] = torch.linspace(0, 1, self.overlap).unsqueeze(1)
+                        if i < num_h - 1:
+                            mask_h[-self.overlap:, :] = torch.linspace(1, 0, self.overlap).unsqueeze(1)
+
+                        if j > 0:
+                            mask_w[:, :self.overlap] = torch.linspace(0, 1, self.overlap).unsqueeze(0)
+                        if j < num_w - 1:
+                            mask_w[:, -self.overlap:] = torch.linspace(1, 0, self.overlap).unsqueeze(0)
+
+                        mask2d = mask_h * mask_w
+                        mask3 = mask2d.unsqueeze(0).repeat(self.channels, 1, 1)  # [C,224,224]
+
+                        recon[:, top:top + self.patch_size, left:left + self.patch_size] += patch * mask3
+                        weight[:, top:top + self.patch_size, left:left + self.patch_size] += mask3
+
+                recon = recon / torch.clamp(weight, min=1e-5)
+                recon_resized_back = TF.resize(recon.unsqueeze(0), size=[orig_H, orig_W], interpolation=TF.InterpolationMode.BILINEAR).squeeze(0)
+
+                # write back into bx (on-device) inside no_grad
+                bx[img_idx] = recon_resized_back.to(device).to(bx.dtype)
+
+            if proc_ptr != stylized_patches_proc.shape[0]:
+                raise RuntimeError("Not all processed patches were consumed during reconstruction.")
+
+        return bx
+
+class N2N_DeepAugment_w_o_rectangular(nn.Module):
+    def __init__(self, orig_batch_size, image_size, channels, noisenet_max_eps=0.75, ratio=0.5):
+        super(N2N_DeepAugment_w_o_rectangular, self).__init__()
         self.image_size = image_size
         self.channels = channels
         self.ratio = ratio

@@ -78,8 +78,8 @@ def main(args):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default="../data/ImageNet-100-synthetic", help="ImageFolder root")
-    ap.add_argument("--out", default="../data/ImageNet-100-add-1m-dm.h5", help="Output HDF5 file path")
+    ap.add_argument("--src", default="../data/Casting-Product-Quality/test", help="ImageFolder root")
+    ap.add_argument("--out", default="../data/Casting-Product-Quality/test.h5", help="Output HDF5 file path")
     ap.add_argument("--compression", action="store_true", help="Use LZF compression for the dataset (fast).")
     args = ap.parse_args()
     main(args)

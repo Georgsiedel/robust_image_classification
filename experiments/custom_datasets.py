@@ -1,6 +1,7 @@
 import random
 import torch
 import os
+import re
 from PIL import Image
 import torchvision.transforms.v2 as transforms
 from sklearn.model_selection import train_test_split
@@ -11,6 +12,53 @@ import io
 import json
 import h5py
 import kornia
+from collections import defaultdict, Counter
+
+def extract_gtsrb_validsplit_according_to_tracks(base_trainset,
+                                                testsplit,
+                                                random_state=0
+                                            ):
+    
+    samples = base_trainset._samples  # (path, class)
+
+    # 1) Build (class, track_id) groups
+    track_to_indices = defaultdict(list)
+
+    for idx, (path, cls) in enumerate(samples):
+        # filename: 00049_00020.ppm -> track_id = 00049
+        track_id = os.path.basename(path).split('_')[0]
+
+        # key includes class to prevent accidental cross-class merging
+        key = (cls, track_id)
+        track_to_indices[key].append(idx)
+
+    # 2) One label per track (now guaranteed by construction)
+    track_keys = list(track_to_indices.keys())
+    track_labels = [cls for cls, _ in track_keys]
+
+    # 3) Convert testsplit
+    if isinstance(testsplit, float):
+        test_size_tracks = testsplit
+    else:
+        test_size_tracks = testsplit / len(samples)
+
+    # 4) Split tracks (stratified by class)
+    train_tracks, val_tracks = train_test_split(
+        track_keys,
+        test_size=test_size_tracks,
+        random_state=random_state,
+        stratify=track_labels
+    )
+
+    # 5) Expand back to sample indices
+    train_indices = [
+        idx for key in train_tracks for idx in track_to_indices[key]
+    ]
+    val_indices = [
+        idx for key in val_tracks for idx in track_to_indices[key]
+    ]
+
+    return val_indices, train_indices
 
 
 def custom_collate_fn(batch, batch_transform_orig, batch_transform_gen, image_transform_orig, 
@@ -56,41 +104,106 @@ class SwaLoader():
 
 class NumericFolderKorniaDataset(Dataset):
     """
-    A drop-in replacement for ImageFolder where subfolder names are numeric
-    class IDs, and labels are kept exactly as those integers.
-    Uses kornia.io.load_image for loading.
+    ImageFolder-like dataset where subfolder names are numeric single-label IDs
+    OR multilabel strings like "0_1_0_0".
+    Uses kornia.io.load_image for loading images.
+
+    Parameters
+    ----------
+    root : str
+        Path to dataset root (folders inside are class labels).
+    multilabel : bool, default=False
+        If True, parse folder names as multilabel vectors (separator by label_sep).
+    transform : callable, optional
+        Transform to apply to the loaded image (expects a torch.Tensor returned from kornia).
+    label_sep : str or regex, default='_'
+        Separator used when parsing multilabel folder names. Can be a regex pattern
+        passed to re.split (for example r"[,_\-]" to accept commas, underscores or dashes).
     """
 
-    def __init__(self, root, transform=None):
+    IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
+
+    def __init__(self, root, multilabel=False, transform=None, label_sep="_"):
         self.root = root
         self.transform = transform
-        self.samples = []
-        self.classes = []
-        self.class_to_idx = {}
+        self.samples = []            # list of (path, label) where label is int or torch.tensor
+        self.classes = []            # list of folder-name strings (keeps deterministic ordering)
+        self.class_to_idx = {}       # maps folder-name string -> int (single) or tensor (multilabel)
+        self.multilabel = bool(multilabel)
+        self.label_sep = label_sep
+        self.num_labels = None       # number of label positions in multilabel mode
 
-        # Iterate through subdirectories
-        for folder in os.listdir(root):
+        # iterate through subdirectories deterministically
+        for folder in sorted(os.listdir(root)):
             folder_path = os.path.join(root, folder)
             if not os.path.isdir(folder_path):
                 continue
 
-            # Convert folder name to integer label
+            if not self.multilabel:
+                # single-label: folder name must be convertible to int
+                try:
+                    class_id = int(folder)
+                except ValueError:
+                    raise ValueError(f"Folder name '{folder}' is not a valid integer class label.")
+                self.classes.append(folder)  # store folder name string
+                self.class_to_idx[folder] = class_id
+
+                # gather images
+                for fname in sorted(os.listdir(folder_path)):
+                    if fname.lower().endswith(self.IMG_EXTS):
+                        img_path = os.path.join(folder_path, fname)
+                        self.samples.append((img_path, class_id))
+
+            else:
+                # multilabel mode: parse folder name like "0_1_0_0"
+                parts = re.split(self.label_sep, folder)
+                if len(parts) == 0:
+                    raise ValueError(f"Multilabel folder name '{folder}' could not be parsed.")
+
+                # convert parts to integers and check they are 0/1
+                try:
+                    label_list = [int(p) for p in parts]
+                except ValueError:
+                    raise ValueError(
+                        f"Multilabel folder '{folder}' contains non-integer parts: {parts}"
+                    )
+
+                # ensure values are 0 or 1
+                if any(x not in (0, 1) for x in label_list):
+                    raise ValueError(
+                        f"Multilabel folder '{folder}' must contain only 0 or 1 values: got {label_list}"
+                    )
+
+                # set/validate number of label positions
+                if self.num_labels is None:
+                    self.num_labels = len(label_list)
+                elif self.num_labels != len(label_list):
+                    raise ValueError(
+                        f"Inconsistent multilabel lengths: folder '{folder}' has length {len(label_list)} "
+                        f"but previous folders have length {self.num_labels}"
+                    )
+        
+                # store as a tuple (cheap Python object), not a torch.Tensor
+                label_key = tuple(label_list)
+
+                self.classes.append(folder)
+                self.class_to_idx[folder] = label_key
+
+                for fname in sorted(os.listdir(folder_path)):
+                    if fname.lower().endswith(self.IMG_EXTS):
+                        img_path = os.path.join(folder_path, fname)
+                        # store the tuple/list, not a tensor
+                        self.samples.append((img_path, label_key))
+
+
+        # For single-label case, keep classes as sorted integers as before if needed
+        if not self.multilabel:
+            # convert stored folder-name strings to ints and sort deterministically
             try:
-                class_id = int(folder)
-            except ValueError:
-                raise ValueError(f"Folder name '{folder}' is not a valid integer class label.")
-
-            self.classes.append(class_id)
-            self.class_to_idx[folder] = class_id
-
-            # Gather image paths
-            for fname in os.listdir(folder_path):
-                if fname.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".tiff")):
-                    img_path = os.path.join(folder_path, fname)
-                    self.samples.append((img_path, class_id))
-
-        # Sort by class ID for deterministic behavior
-        self.classes = sorted(self.classes)
+                self.classes = sorted([int(x) for x in self.classes])
+            except Exception:
+                # fallback: keep folder-name strings
+                pass
 
     def __len__(self):
         return len(self.samples)
@@ -104,7 +217,13 @@ class NumericFolderKorniaDataset(Dataset):
         if self.transform:
             img = self.transform(img)
 
-        return img, label
+        # Convert label to tensor here (only when needed, inside worker)
+        if isinstance(label, (tuple, list)):
+            label = torch.tensor(label, dtype=torch.float32)
+        elif isinstance(label, int):
+            label = int(label)  # keep int for single-label
+
+        return img, label   
 
 class NumpyDataset(Dataset):
     def __init__(self, images, labels, transform=None):

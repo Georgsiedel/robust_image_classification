@@ -11,7 +11,7 @@ import experiments.eval_corruption_transforms as c
 import torch
 from PIL import Image
 import numpy as np
-import time
+import kornia
 from typing import Optional
 from experiments.utils import plot_images
 import experiments.style_transfer as style_transfer
@@ -112,6 +112,13 @@ class TransformFactory:
 
         return batch_transforms, after_style, after_nostyle
 
+def safe_loader(path):
+    try:
+        return kornia.io.load_image(path) # Kornia: float32, CHW, [0,1]
+    except:
+        img = Image.open(path).convert("RGB")
+        arr = np.asarray(img, dtype=np.float32) / 255.0
+        return torch.from_numpy(arr).permute(2, 0, 1)
 
 class PilToNumpy(object):
     def __init__(self, as_float=False, scaled_to_one=False):
@@ -184,10 +191,8 @@ def build_transform_c_bar(name, severity, dataset, resize):
     
     if dataset in ['CIFAR10', 'CIFAR100', 'GTSRB']: 
         im_size = 32
-    elif dataset in ['TinyImageNet', 'EuroSAT', 'WaferMap']: 
+    elif dataset in ['TinyImageNet', 'EuroSAT', 'WaferMap', 'PCAM']:
         im_size = 64
-    elif dataset in ['PCAM']:
-        im_size = 96
     elif dataset in ['KITTI_Distance_Multiclass', 'KITTI_RoadLane']:
         im_size = 384
     else:
@@ -572,6 +577,7 @@ class DuringTrainingTransforms:
         self.robust_samples = robust_samples
 
     def __call__(self, x):
+        
         total = x.shape[0]
         synth_samples = int(total * self.synthetic_ratio)
         confidences = torch.full((total,), 1.0, device=x.device, dtype=x.dtype)

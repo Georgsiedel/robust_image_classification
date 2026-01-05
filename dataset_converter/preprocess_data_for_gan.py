@@ -59,14 +59,14 @@ class CompactMultilabelEncoder:
 def load_user_dataset(dataset):
     print(f"Loading dataset: {dataset}...")
     
-    data_class = DataLoading(dataset=dataset)
+    data_class = DataLoading(dataset=dataset, validontest=False)
     data_class.create_transforms(train_aug_strat_orig='None', train_aug_strat_gen='None')
     
     #Adjust training image preprocessing. 
     #Normally uses lower-size training images (FixRes recipe) and random resized crop that are different to test transforms.
     #This could induce bias, hence we now use the test images preprocessing on train image as well.
     #Distance is measured with those transforms for later evaluation on test images.
-    if dataset in ['Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material']:
+    if dataset in ['Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 'TreeSAT']:
         data_class.transforms_preprocess_train = transforms.Compose([transforms.Resize(272, antialias=True), 
                                                                     transforms.CenterCrop(256)])
         imagesize = 256
@@ -150,11 +150,18 @@ def load_user_dataset(dataset):
                 ])
         imagesize = 64
         multilabel = True
+    elif dataset in ['PCAM']:
+        #getting rid of any random padding
+        data_class.transforms_preprocess_train = transforms.Compose([transforms.CenterCrop(64)])
+        imagesize = 64
+        multilabel = False
+        class_to_idx = {"negative": 0, 
+                        "positive": 1}
 
     data_class.load_base_data()
     trainset = SubsetWithTransform(data_class.base_trainset, data_class.transforms_preprocess_train)
 
-    if dataset in ['Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material']:
+    if dataset in ['Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 'TreeSAT']:
         if hasattr(trainset, 'class_to_idx'):
             # This works if user_trainset is the main dataset (e.g., ImageFolder)
             class_to_idx = trainset.class_to_idx
@@ -265,7 +272,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', type=str, default='WaferMap', help="Name of the dataset to preprocess")
+    parser.add_argument('--dataset_name', type=str, default='GTSRB', help="Name of the dataset to preprocess")
     parser.add_argument('--gan_data_dir', type=str, default='../data', help="Folder for images")
     args = parser.parse_args()
     main(args)

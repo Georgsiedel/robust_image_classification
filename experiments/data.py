@@ -15,7 +15,7 @@ import experiments.custom_transforms as custom_transforms
 from run_0 import device
 from experiments.utils import plot_images, CsvHandler
 from experiments.custom_datasets import SubsetWithTransform, NumpyDataset, AugmentedDataset, HDF5ImageDataset, CustomDataset, NumericFolderKorniaDataset
-from experiments.custom_datasets import BalancedRatioSampler, BasicAugmentedDataset, StyleDataset
+from experiments.custom_datasets import BalancedRatioSampler, BasicAugmentedDataset, StyleDataset, extract_gtsrb_validsplit_according_to_tracks
 
 def normalization_values(batch, dataset, normalized, manifold=False, manifold_factor=1, verbose=False):
 
@@ -126,7 +126,7 @@ class DataLoading():
         elif dataset in ['TinyImageNet', 'EuroSAT', 'Wafermap']:
             self.factor = 2
         elif dataset in ['PCAM']:
-            self.factor = 3
+            self.factor = 2
         else:
             self.factor = 1
         
@@ -240,6 +240,9 @@ class DataLoading():
                 custom_transforms.ExpandGrayscaleTensorTo3Channels(), #directly converts to 3 channels
                 p64
             ])
+        elif self.dataset == 'PCAM':
+            self.transforms_preprocess_train =  transforms.RandomCrop(64)
+            self.transforms_preprocess_test = transforms.CenterCrop(64)
             
         else:
             self.transforms_preprocess_train = transforms.Compose([t])
@@ -256,26 +259,27 @@ class DataLoading():
             self.transforms_preprocess_train = transforms.Compose([self.transforms_preprocess_train, r224]) 
             self.transforms_preprocess_test = transforms.Compose([self.transforms_preprocess_test, r224])
 
-        # standard augmentations of training set, without tensor transformation
-        if self.dataset in ['ImageNet', 'ImageNet-100', 'Describable-Textures', 'Flickr-Material', 
-                            'KITTI_RoadLane', 'KITTI_Distance_Multiclass']:
-            self.transforms_basic = transforms.Compose([flip])
-        elif self.dataset in ['TreeSAT', 'Casting-Product-Quality', 'SynthiCAD']:
-            self.transforms_basic = transforms.Compose([flip, flip_v])
-        elif self.dataset in ['CIFAR10', 'CIFAR100', 'GTSRB']:
-            self.transforms_basic = transforms.Compose([flip, c32])
-        elif self.dataset in ['EuroSAT']:
-            self.transforms_basic = transforms.Compose([flip, flip_v, c64])
-        elif self.dataset in ['TinyImageNet']:
-            self.transforms_basic = transforms.Compose([flip, c64])
-        elif self.dataset in ['PCAM']:
-            self.transforms_basic = transforms.Compose([flip, flip_v, c96])
-        elif self.dataset in ['WaferMap']:
-            self.transforms_basic = transforms.Compose([flip, flip_v, c64_WM])
+        # basic crop and flip augmentations used for training only
+        basic_list = []
+        if self.dataset not in ['GTSRB']:
+            basic_list.append(flip)
+        if self.dataset in ['TreeSAT', 'Casting-Product-Quality', 'SynthiCAD','EuroSAT','PCAM','WaferMap','Describable-Textures']:
+            basic_list.append(flip_v)
+        if self.dataset in ['CIFAR10', 'CIFAR100', 'GTSRB']:
+            basic_list.append(c32)
+        elif self.dataset in ['EuroSAT','PCAM','TinyImageNet']:
+            basic_list.append(c64)
+        elif self.dataset == 'WaferMap':
+            basic_list.append(c64_WM)
 
-        if (self.resize or aggressive_soft_crop) and self.dataset in ['TinyImageNet', 'PCAM', 'WaferMap', 'EuroSAT', 
-                                                                           'CIFAR10', 'CIFAR100', 'GTSRB']:
-            self.transforms_basic = transforms.Compose(self.transforms_basic[:-1]) #get rid of crop/resize
+        if (self.resize or aggressive_soft_crop):
+            # remove crop/resize logic entirely
+            basic_list = [tr for tr in basic_list if tr not in {c32, c64, c64_WM}]
+        
+        if basic_list:
+            self.transforms_basic = transforms.Compose(basic_list)
+        else:
+            self.transforms_basic = transforms.Identity()     
 
         transform_manager_orig = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_orig, 
                                                                     self.style_orig, self.style_and_aug_orig, self.dataset, self.minibatchsize)
@@ -332,12 +336,13 @@ class DataLoading():
             if self.dataset in ['ImageNet']:
                 self.testset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/val'),
                                                                 transform=self.transforms_preprocess_test,
-                                                                loader=kornia.io.load_image)
+                                                                loader=custom_transforms.safe_loader
+                                                                )
                 if test_only:
                     self.base_trainset = None
                 else:
                     self.base_trainset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/train'),
-                                                                loader=kornia.io.load_image)
+                                                                loader=custom_transforms.safe_loader)
 
             elif self.dataset in ['TinyImageNet', 'ImageNet-100']:
                 self.testset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_val.h5',
@@ -471,7 +476,7 @@ class DataLoading():
         else:
             if self.dataset in ['ImageNet']:
                 base_trainset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/train'),
-                                                                loader=kornia.io.load_image)
+                                                                loader=custom_transforms.safe_loader)
             elif self.dataset in ['TinyImageNet', 'ImageNet-100', 'TreeSAT', 'Casting-Product-Quality', 'KITTI_RoadLane']:
                 base_trainset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_train.h5')
             elif self.dataset in ['CIFAR10', 'CIFAR100']:
@@ -480,15 +485,29 @@ class DataLoading():
             elif self.dataset in ['GTSRB']:
                 load_helper = getattr(torchvision.datasets, self.dataset)
                 base_trainset = load_helper(root=os.path.abspath(f'{self.data_path}'), split='train', download=True)
+                
+                #extract custom validation split according to tracks
+                testsplit = 0.2 if len(base_trainset) <= 50000 else 10000
+                val_indices, train_indices = extract_gtsrb_validsplit_according_to_tracks(base_trainset, testsplit, random_state=self.run)
+
+                if test_only == False:
+                    self.base_trainset = Subset(base_trainset, train_indices)
+
+                self.testset = SubsetWithTransform(Subset(base_trainset, val_indices), self.transforms_preprocess_test)
+                
+                self.num_classes = extract_num_classes(self.testset)
+                return
+
             elif self.dataset in ['PCAM']:
-                self.base_trainset = HDF5ImageDataset(f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_train_x.h5',
-                                                f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_train_y.h5')
+                if test_only == False:
+                    self.base_trainset = HDF5ImageDataset(f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_train_x.h5',
+                                                    f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_train_y.h5')
                 
                 self.testset = HDF5ImageDataset(f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_valid_x.h5',
                                                 f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_valid_y.h5', 
                                                 transform=self.transforms_preprocess_test)
                     
-                self.num_classes = len(self.base_trainset.classes)
+                self.num_classes = extract_num_classes(self.testset)
                 return  #already features train/val split, so we can return
             elif self.dataset in ['SynthiCAD']:
                 self.testset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_valid.h5',
@@ -560,7 +579,6 @@ class DataLoading():
                 random_state=self.run)  # same validation split for same runs, but new validation on multiple runs
             
             if test_only == False:
-
                 self.base_trainset = Subset(base_trainset, train_indices)
 
             self.testset = SubsetWithTransform(Subset(base_trainset, val_indices), self.transforms_preprocess_test)
@@ -581,18 +599,19 @@ class DataLoading():
                     if self.dataset == "ImageNet-100":
                         self.generated_dataset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}-add-1m-dm.h5')
                         #self.generated_dataset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-synthetic'),
-                        #                                                loader=kornia.io.load_image)
+                        #                                                loader=custom_transforms.safe_loader)
                         self.generated_dataset_length = len(self.generated_dataset)
-                    elif self.dataset in ["CIFAR100", "CIFAR10"]:
+                    elif self.dataset in ["CIFAR100", "CIFAR10", 'TinyImageNet']:
                         self.generated_dataset = np.load(os.path.abspath(f'{self.data_path}/{self.dataset}-add-1m-dm.npz'),
                                                 mmap_mode='r') 
                         self.generated_dataset_length = len(self.generated_dataset['label'])
                     else:
-                        self.generated_dataset = NumericFolderKorniaDataset(root=os.path.abspath(f'{self.data_path}/{self.dataset}_GAN'))
+                        self.generated_dataset = NumericFolderKorniaDataset(root=os.path.abspath(f'{self.data_path}/{self.dataset}_GAN'),
+                                                                            multilabel=self.multilabel)
                         self.generated_dataset_length = len(self.generated_dataset)
                     self.generated_ratio = generated_ratio
                 except:
-                    print(f'No synthetic data found for this dataset in {self.data_path}/{self.dataset}-add-1m-dm.npz')
+                    print(f'No synthetic data found for this dataset in {self.data_path}')
                     self.generated_ratio = 0.0
                     self.generated_dataset = None
             else:
@@ -627,7 +646,7 @@ class DataLoading():
             if self.num_generated > 0 and self.generated_dataset is not None:
                 generated_indices = np.random.choice(self.generated_dataset_length, size=self.num_generated, replace=False)
 
-                if self.dataset in ["CIFAR100", "CIFAR10"]:
+                if self.dataset in ["CIFAR100", "CIFAR10", 'TinyImageNet']:
                     generated_subset = NumpyDataset(
                         self.generated_dataset['image'][generated_indices],
                         self.generated_dataset['label'][generated_indices],
@@ -661,7 +680,7 @@ class DataLoading():
             if self.num_generated > 0 and self.generated_dataset is not None:
                 generated_indices = np.random.choice(self.generated_dataset_length, size=self.num_generated, replace=False)
 
-                if self.dataset in ["CIFAR100", "CIFAR10"]:
+                if self.dataset in ["CIFAR100", "CIFAR10", 'TinyImageNet']:
                     generated_subset = NumpyDataset(
                         self.generated_dataset['image'][generated_indices],
                         self.generated_dataset['label'][generated_indices],
@@ -690,31 +709,32 @@ class DataLoading():
         random_corrupted_testset = None
         loaded_from_repo = False
 
-        # --- Try to load from disk if load_root was explicitly provided ---
+        # --- Try to load from disk if load_root was explicitly provided and the testset is used---
         if load_root is not None:
-            base_paths = [
-                os.path.join(load_root, f"{self.dataset}-c", corruption),
-                os.path.join(load_root, f"{self.dataset}-c-bar", corruption)
-            ]
+            if self.validontest == True:
+                base_paths = [
+                    os.path.join(load_root, f"{self.dataset}-c", corruption),
+                    os.path.join(load_root, f"{self.dataset}-c-bar", corruption)
+                ]
+            else:
+                base_paths = [
+                    os.path.join(load_root, f"{self.dataset}-c-valid_{self.run}", corruption),
+                    os.path.join(load_root, f"{self.dataset}-c-bar-valid_{self.run}", corruption)
+                ]
 
             for repo_path in base_paths:
                 if os.path.isdir(repo_path) and any(os.scandir(repo_path)):
-                    
-                    class_to_idx = {
-                        folder: int(folder)
-                        for folder in os.listdir(repo_path)
-                        if os.path.isdir(os.path.join(repo_path, folder))
-                    }
                     random_corrupted_testset = NumericFolderKorniaDataset(
                         root=repo_path,
-                        transform=self.transforms_preprocess_test,
+                        multilabel=self.multilabel,
+                        #transform=self.transforms_preprocess_test,
                     )
                     loaded_from_repo = True
                     break
 
             if not loaded_from_repo:
                 print(
-                    f"No precomputed corruption found at either:\n"
+                    f"Tried using precomputed corruptions, but none found at either:\n"
                     f"  {base_paths[0]}\n  {base_paths[1]}\n"
                     "Falling back to on-the-fly corruption."
                 )
@@ -729,7 +749,7 @@ class DataLoading():
             )
 
         # --- Apply subset if requested ---
-        if subset:
+        if subset == True and subsetsize < len(random_corrupted_testset):
             selected_indices = np.random.choice(
                 len(random_corrupted_testset), subsetsize, replace=False
             )
@@ -790,6 +810,11 @@ class DataLoading():
         global fixed_worker_rng #impulse noise augmentations sk-learn function needs a separate rng for reproducibility
         fixed_worker_rng = np.random.default_rng()
 
+        if not self.validontest:
+            print('Using custom c- and c-bar corruptions on validation data.')
+        if load_root is not None:
+            print(f'Trying to load precomputed corruptions from {load_root} if available.')
+
         if self.dataset == 'CIFAR10' or self.dataset == 'CIFAR100':
             #c-bar-corruption benchmark: https://github.com/facebookresearch/augmentation-corruption
             
@@ -805,7 +830,7 @@ class DataLoading():
                     np_data_c = np.load(os.path.abspath(f'{self.data_path}/{self.dataset}-{set}/{corruption}.npy'), mmap_mode='r')
                     np_data_c = np.array(np.array_split(np_data_c, 5))
 
-                    if subset == True:
+                    if subset == True and subsetsize < len(self.testset):
                         selected_indices = np.random.choice(len(self.testset), subsetsize, replace=False)
                         subtestset = Subset(self.testset, selected_indices)
                         np_data_c = [intensity_dataset[selected_indices] for intensity_dataset in np_data_c]
@@ -813,7 +838,7 @@ class DataLoading():
                     c_datasets.append(concat_intensities)
 
                 else:
-                    c_datasets = self.precompute_and_append_c_data(set, c_datasets, corruption, csv_handler, subset, subsetsize, valid_run)
+                    c_datasets = self.precompute_and_append_c_data(set, c_datasets, corruption, csv_handler, subset, subsetsize, valid_run, load_root)
                     
         elif self.dataset in ['ImageNet', 'TinyImageNet', 'ImageNet-100']:
 
@@ -827,8 +852,8 @@ class DataLoading():
                 if self.validontest:
                     intensity_datasets = [torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-{set}/' + corruption + '/' + str(intensity)),
                                                                         transform=self.transforms_preprocess_test,
-                                                                loader=kornia.io.load_image) for intensity in range(1, 6)]
-                    if subset == True:
+                                                                loader=custom_transforms.safe_loader) for intensity in range(1, 6)]
+                    if subset == True and subsetsize < len(self.testset):
                         selected_indices = np.random.choice(len(intensity_datasets[0]), subsetsize, replace=False)
                         intensity_datasets = [Subset(intensity_dataset, selected_indices) for intensity_dataset in intensity_datasets]
                     
@@ -836,13 +861,11 @@ class DataLoading():
                     c_datasets.append(concat_intensities)
 
                 else:
-                    c_datasets = self.precompute_and_append_c_data(set, c_datasets, corruption, csv_handler, subset, subsetsize, valid_run)
+                    c_datasets = self.precompute_and_append_c_data(set, c_datasets, corruption, csv_handler, subset, subsetsize, valid_run, load_root)
 
         else:
             if self.validontest and load_root == None:
-                print('No c- and c-bar-benchmark available for this dataset. Building custom corruptions.')
-            elif self.validontest and load_root is not None:
-                print('No c- and c-bar-benchmark available for this dataset. Using custom prebuilt corruptions.')
+                print(f'No c- and c-bar-benchmark available for {self.dataset}. Using custom corruptions.')
 
             if self.dataset in ['GTSRB', 'Wafermap']:
                 csv_handler = CsvHandler(os.path.abspath(f'{self.c_labels_path}/cifar_c_bar.csv'))
@@ -886,7 +909,7 @@ class DataLoading():
                                     generator=g, persistent_workers=False)
         
         val_workers = self.number_workers if self.dataset in ['ImageNet', 'ImageNet-100', 'TreeSAT', 'Casting-Product-Quality', 
-                       'Describable-Textures', 'Flickr-Material', 'SynthiCAD', 'KITTI_RoadLane', 'KITTI_Distance_Multiclass'] else 0
+                       'Describable-Textures', 'SynthiCAD', 'KITTI_RoadLane', 'KITTI_Distance_Multiclass'] else 0
         self.testloader = DataLoader(self.testset, batch_size=batchsize, pin_memory=True, num_workers=val_workers)
 
         return self.trainloader, self.testloader

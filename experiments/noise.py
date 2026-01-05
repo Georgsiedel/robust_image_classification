@@ -1,11 +1,16 @@
 import re
 import torch
 import math
+
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import numpy as np
 import random
 import torch.distributions as dist
-from data import normalization_values
-from utils import plot_images
+from experiments.data import normalization_values, DataLoading
+from experiments.utils import plot_images
 from itertools import chain
 from run_0 import device
 
@@ -101,6 +106,8 @@ def _noising(x, add_noise_level=0.0, mult_noise_level=0.0, sparse_level=0.0, l0_
 
 def noise_up(x, robust_samples=0, add_noise_level=0.0, mult_noise_level=0.0, sparse_level=0.0, l0_level=0.0):
     # based on https://github.com/erichson/NoisyMix
+    x = x.clone()
+
     q = int(x.shape[0] / (robust_samples+1))
     sparsity = random.random() * sparse_level
     for i in range(robust_samples+1):
@@ -297,3 +304,28 @@ def sample_lp_corr_batch(noise_type, epsilon, batch, density_distribution_max, m
     if not manifold:
         corrupted_batch = torch.clamp(corrupted_batch, (0-mean)/std, (1-mean)/std)  #clip below lower and above upper bound
     return corrupted_batch
+
+if __name__ == '__main__':
+
+    dataset='KITTI_RoadLane'
+    test_corruption = {'noise_type': 'uniform-linf', 'epsilon': 0.04, 'sphere': True, 'distribution': 'max'},
+
+    Dataloader = DataLoading(dataset=dataset, validontest=True, resize=False, 
+                                run=0, number_workers=0, kaggle=False)
+    Dataloader.create_transforms(train_aug_strat_orig='None', train_aug_strat_gen='None')
+    Dataloader.load_base_data(test_only=True)
+    
+    testloader = torch.utils.data.DataLoader(Dataloader.testset, 
+                                             batch_size=20, 
+                                             pin_memory=True, 
+                                             num_workers=0,
+                                             shuffle=True)
+
+    with torch.no_grad():
+        for batch_idx, (inputs, targets) in enumerate(testloader):
+            inputs, targets = inputs.to(device, dtype=torch.float), targets.to(device)
+            inputs_pert = inputs.clone()
+            inputs_pert = apply_noise(inputs_pert, 1, test_corruption, 1, False, dataset)
+            break
+
+    plot_images(3, inputs, corrupted_images=inputs_pert, save=True)

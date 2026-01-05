@@ -47,18 +47,29 @@ class RandomMixup(torch.nn.Module):
         """
         #if batch.ndim != 4:
         #    raise ValueError(f"Batch ndim should be 4. Got {batch.ndim}")
-        if target.ndim != 1:
-            raise ValueError(f"Target ndim should be 1. Got {target.ndim}")
-        if not batch.is_floating_point():
-            raise TypeError(f"Batch dtype should be a float tensor. Got {batch.dtype}.")
-        if target.dtype != torch.int64:
-            raise TypeError(f"Target dtype should be torch.int64. Got {target.dtype}")
+        if target.ndim == 1:
+            if target.dtype != torch.int64:
+                raise TypeError(
+                    f"1D target must be torch.int64 for class indices. Got {target.dtype}"
+                )
+            target = torch.nn.functional.one_hot(
+                target, num_classes=self.num_classes
+            ).to(dtype=batch.dtype)
+
+        elif target.ndim == 2:  # target.ndim == 2
+            if target.shape[1] != self.num_classes:
+                raise ValueError(
+                    f"2D target must have shape (B, num_classes={self.num_classes}). "
+                    f"Got {target.shape}"
+                )
+            if not target.is_floating_point():
+                target = target.to(dtype=batch.dtype)
+        else:
+            raise ValueError(f"Target ndim should be 1 or 2. Got {target.ndim}")
 
         if not self.inplace:
             batch = batch.clone()
             target = target.clone()
-        if target.ndim == 1:
-            target = torch.nn.functional.one_hot(target, num_classes=self.num_classes).to(dtype=batch.dtype)
 
         if torch.rand(1).item() >= self.p:
             return batch, target
@@ -130,19 +141,30 @@ class RandomCutmix(torch.nn.Module):
         """
         #if batch.ndim != 4:
         #    raise ValueError(f"Batch ndim should be 4. Got {batch.ndim}")
-        if target.ndim != 1:
-            raise ValueError(f"Target ndim should be 1. Got {target.ndim}")
-        if not batch.is_floating_point():
-            raise TypeError(f"Batch dtype should be a float tensor. Got {batch.dtype}.")
-        if target.dtype != torch.int64:
-            raise TypeError(f"Target dtype should be torch.int64. Got {target.dtype}")
+        
+        if target.ndim == 1:
+            if target.dtype != torch.int64:
+                raise TypeError(
+                    f"1D target must be torch.int64 for class indices. Got {target.dtype}"
+                )
+            target = torch.nn.functional.one_hot(
+                target, num_classes=self.num_classes
+            ).to(dtype=batch.dtype)
+
+        elif target.ndim == 2:  # target.ndim == 2
+            if target.shape[1] != self.num_classes:
+                raise ValueError(
+                    f"2D target must have shape (B, num_classes={self.num_classes}). "
+                    f"Got {target.shape}"
+                )
+            if not target.is_floating_point():
+                target = target.to(dtype=batch.dtype)
+        else:
+            raise ValueError(f"Target ndim should be 1 or 2. Got {target.ndim}")
 
         if not self.inplace:
             batch = batch.clone()
             target = target.clone()
-
-        if target.ndim == 1:
-            target = torch.nn.functional.one_hot(target, num_classes=self.num_classes).to(dtype=batch.dtype)
 
         if torch.rand(1).item() >= self.p:
             return batch, target

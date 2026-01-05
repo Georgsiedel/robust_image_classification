@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import torchvision.transforms.v2 as transforms
 import random
+from pathlib import Path
 
 from data import DataLoading
 from custom_datasets import SubsetWithTransform
@@ -210,7 +211,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    for dataset in ['Describable-Textures']:
+    for dataset in ['CIFAR100']:
         
         for norm_distance in [np.inf, 1, 2]:
             #random seeding for reproducibility (this is only important should random preprocessing be used - 

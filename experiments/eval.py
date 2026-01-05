@@ -158,9 +158,13 @@ if __name__ == '__main__':
                 subsetsize = 5000 if args.validontest else 1000
                 testsets_c = Dataloader.load_data_c(subset=subset, subsetsize=subsetsize, valid_run=False,
                                                     load_root="../data")
+                if args.experiment in []:
+                    root="../data"
+                else:
+                    root=None
                 accs_c = eval_corruptions.compute_c_corruptions(args.dataset, testsets_c, model, args.batchsize, Dataloader.num_classes, 
                                                                 valid_run=False, workers=workers, multilabel=Dataloader.multilabel,
-                                                                save_root=None)[0]
+                                                                save_root=root)[0]
                 Testtracker.track_results(accs_c, i)
 
             if args.calculate_adv_distance == True:  # adversarial distance calculation
@@ -176,6 +180,12 @@ if __name__ == '__main__':
 
             # Robust Accuracy on p-norm noise - either combined or separate noise types
             accs = eval_corruptions.select_p_corruptions(testloader, model, test_corruptions, args.dataset, args.combine_test_corruptions)
+            if not args.combine_test_corruptions:
+                # Compute combined average robustness metrics: Class Separation Robustness, imperceptible Robustness, Average p-norm robustness
+                class_separation_robustness = float(np.mean(accs[0:3]))
+                imperceptible_robustness = float(np.mean(accs[3:9]))
+                average_pnorm_robustness = float(np.mean(accs[9:]))
+                accs.extend([class_separation_robustness, imperceptible_robustness, average_pnorm_robustness])
             Testtracker.track_results(accs, i)
 
             print(Testtracker.accs)

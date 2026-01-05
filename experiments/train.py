@@ -160,8 +160,6 @@ configname = (f'experiments.configs.config{args.experiment}')
 config = importlib.import_module(configname)
 train_corruptions = config.train_corruptions
 
-TA = torchvision.transforms.v2.TrivialAugmentWide()
-
 def train_epoch(pbar):
 
     model.train()
@@ -186,8 +184,8 @@ def train_epoch(pbar):
         if args.stylization_first == False:
             inputs, confidences = Dataloader.during_train_transform(inputs)
         else:
-            confidences = confidences = torch.full((inputs.size(0),), 1.0, device=inputs.device, dtype=inputs.dtype)
-        
+            confidences = torch.full((inputs.size(0),), 1.0, device=inputs.device, dtype=inputs.dtype)
+
         #returns smoothed labels according to fixed labelsmoothing and soft augmentation confidence
         #handles multilabel case internally, returns one hot labels
         targets = Dataloader.during_train_label_transform(targets, confidences)
@@ -221,7 +219,6 @@ def train_epoch(pbar):
 
             with torch.amp.autocast(device_type=device, enabled=False): # recommended for numerical stability
                 loss = criterion.add_trades_loss(loss, model, optimizer, inputs, targets)
-
 
         Scaler.scale(loss).backward()
         Scaler.unscale_(optimizer)
@@ -265,10 +262,6 @@ def valid_epoch(pbar, net):
         test_loss, correct, total, avg_test_loss, adv_acc, acc_c, adv_correct = 0, 0, 0, 0, 0, 0, 0
 
         for batch_idx, (inputs, targets) in enumerate(validationloader):
-            #plot_images(5, 
-            #            torch.tensor([0.0,0.0,0.0]).view(1, 3, 1, 1), 
-            #            torch.tensor([1.0,1.0,1.0]).view(1, 3, 1, 1),
-            #            inputs, targets)
 
             inputs, targets = inputs.to(device, dtype=torch.float32), targets.to(device)
 
@@ -396,7 +389,7 @@ if __name__ == '__main__':
     # Calculate steps and epochs
     total_steps, start_steps = utils.calculate_steps(Dataloader.base_trainset, Dataloader.testset, args.batchsize, args.epochs, 
                                     start_epoch, args.warmupepochs, args.validonc, args.swa['apply'], args.swa['start_factor'])
-    
+
     with tqdm(total=total_steps, initial=start_steps) as pbar:
         
         training_start_time = time.time()

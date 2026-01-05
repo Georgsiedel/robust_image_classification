@@ -49,7 +49,7 @@ class BasicBlock(nn.Module):
         base_width: int = 64,
         dilation: int = 1,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
-        activation_function = F.relu,
+        activation_function: Callable[[], nn.Module] = nn.ReLU,
     ) -> None:
         super().__init__()
         if norm_layer is None:
@@ -61,7 +61,7 @@ class BasicBlock(nn.Module):
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm_layer(planes)
-        self.activation_function = activation_function
+        self.activation_function = activation_function()
         self.conv2 = conv3x3(planes, planes)
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
@@ -104,7 +104,7 @@ class Bottleneck(nn.Module):
         base_width: int = 64,
         dilation: int = 1,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
-        activation_function = F.relu
+        activation_function: Callable[[], nn.Module] = nn.ReLU
     ) -> None:
         super().__init__()
         if norm_layer is None:
@@ -117,7 +117,7 @@ class Bottleneck(nn.Module):
         self.bn2 = norm_layer(width)
         self.conv3 = conv1x1(width, planes * self.expansion)
         self.bn3 = norm_layer(planes * self.expansion)
-        self.activation_function = activation_function
+        self.activation_function = activation_function()
         self.downsample = downsample
         self.stride = stride
 
@@ -164,21 +164,20 @@ class ResNet(ct_model.CtModel):
         super(ResNet, self).__init__(dataset=dataset, normalized=normalized, num_classes=num_classes)
 
         # Mapping of lowercase names to proper torch.nn class names
-        #activation_mapping = {
-        #    "silu": "SiLU",
-        #    "relu": "ReLU",
-        #    "gelu": "GELU",
-        #    "tanh": "Tanh",
-        #    "sigmoid": "Sigmoid",
-        #    # Add more activations as needed
-        #}
-        # Normalize the activation function name
-        #activation_class_name = activation_mapping.get(activation_function.lower())
-        #if activation_class_name is None:
-        #    raise ValueError(f"Unsupported activation function: {activation_function}")
-        
-        # Dynamically get the activation class from torch.nn
-        #self.activation_function = getattr(nn, activation_class_name)
+        ACTIVATIONS = {
+            "relu": nn.ReLU,
+            "silu": nn.SiLU,
+            "gelu": nn.GELU,
+            "tanh": nn.Tanh,
+            "sigmoid": nn.Sigmoid,
+        }
+
+        activation_name = activation_function.lower()
+        if activation_name not in ACTIVATIONS:
+            raise ValueError(f"Unsupported activation function: {activation_function}")
+
+        # This is a FACTORY, not a module
+        self.activation_function = ACTIVATIONS[activation_name]
 
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -199,7 +198,6 @@ class ResNet(ct_model.CtModel):
         self.base_width = width_per_group
         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = norm_layer(self.inplanes)
-        self.activation_function = getattr(F, activation_function)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(self.activation_function, block, 64, layers[0])
         self.layer2 = self._make_layer(self.activation_function, block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0])
@@ -207,7 +205,7 @@ class ResNet(ct_model.CtModel):
         self.layer4 = self._make_layer(self.activation_function, block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
-        self.blocks = [nn.Sequential(self.conv1, self.bn1, torch.nn.ReLU(), self.maxpool), self.layer1, self.layer2, self.layer3]
+        self.blocks = [nn.Sequential(self.conv1, self.bn1, self.activation_function(), self.maxpool), self.layer1, self.layer2, self.layer3]
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -228,7 +226,7 @@ class ResNet(ct_model.CtModel):
 
     def _make_layer(
         self,
-        activation_function,
+        activation_function: Callable[[], nn.Module],
         block: Type[Union[BasicBlock, Bottleneck]],
         planes: int,
         blocks: int,
