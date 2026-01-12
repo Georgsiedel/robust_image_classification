@@ -155,10 +155,9 @@ if __name__ == '__main__':
                 subset = False if args.validontest else True
                 subsetsize = None if args.validontest else 1000 #subset for quick validation runs
                 
-                subsetsize = 5000 if args.validontest else 1000
                 testsets_c = Dataloader.load_data_c(subset=subset, subsetsize=subsetsize, valid_run=False,
                                                     load_root="../data")
-                if args.experiment in []:
+                if args.experiment in [389]:
                     root="../data"
                 else:
                     root=None

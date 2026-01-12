@@ -186,13 +186,15 @@ class DivideBy3:
 def build_transform_c_bar(name, severity, dataset, resize):
     assert dataset in ['CIFAR10', 'CIFAR100', 'ImageNet', 'ImageNet-100', 'TinyImageNet', 'GTSRB', 'PCAM', 
                        'EuroSAT', 'WaferMap', 'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 
-                       'TreeSAT', 'KITTI_Distance_Multiclass', 'KITTI_RoadLane', 'SynthiCAD'],\
+                       'TreeSAT', 'KITTI_Distance_Multiclass', 'KITTI_RoadLane', 'SynthiCAD', 'NEU-surface-defect'],\
             "Dataset not defined and functionality not explored for c-bar benchmark."
     
     if dataset in ['CIFAR10', 'CIFAR100', 'GTSRB']: 
         im_size = 32
     elif dataset in ['TinyImageNet', 'EuroSAT', 'WaferMap', 'PCAM']:
         im_size = 64
+    elif dataset in ['NEU-surface-defect']:
+        im_size = 128
     elif dataset in ['KITTI_Distance_Multiclass', 'KITTI_RoadLane']:
         im_size = 384
     else:

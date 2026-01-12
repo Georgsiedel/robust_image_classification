@@ -158,6 +158,8 @@ def get_nearest_oppo_dist(norm, dataset, batch_size):
                                                                      transforms.CenterCrop(224)])
     elif dataset in ['KITTI_RoadLane', 'KITTI_Distance_Multiclass']:
         data_class.transforms_preprocess_train = transforms.Resize((384,1280), antialias=True)
+    elif dataset in ['NEU-surface-defect']:
+        data_class.transforms_preprocess_train = transforms.Resize(128, antialias=True)
     elif dataset in ['WaferMap']:
         #getting rid of any random padding
         data_class.transforms_preprocess_train = transforms.Compose([
@@ -167,6 +169,8 @@ def get_nearest_oppo_dist(norm, dataset, batch_size):
                     custom_transforms.ExpandGrayscaleTensorTo3Channels(),
                     transforms.Pad(6) #our test time transform just pads 6px. 
                 ])
+    elif dataset in ['PCAM']:
+        data_class.transforms_preprocess_train = transforms.CenterCrop(64)
 
     data_class.load_base_data()
     trainset = SubsetWithTransform(data_class.base_trainset, data_class.transforms_preprocess_train)
@@ -211,7 +215,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    for dataset in ['CIFAR100']:
+    for dataset in ['NEU-surface-defect', 'PCAM']:
         
         for norm_distance in [np.inf, 1, 2]:
             #random seeding for reproducibility (this is only important should random preprocessing be used - 
@@ -260,5 +264,6 @@ if __name__ == '__main__':
 
             epsilon_min = ret[2, :].min()/2
             print("Epsilon: ", epsilon_min)
+            Path(f"./results/{dataset}/").mkdir(parents=True, exist_ok=True)
 
             df_ret.to_csv(f"./results/{dataset}/class_separation_distance_{norm_distance}_norm.csv", index=True, header=True, sep=';', float_format='%1.6f', decimal=',')

@@ -17,6 +17,28 @@ from experiments.data import DataLoading
 import experiments.custom_transforms as custom_transforms
 from experiments.custom_datasets import SubsetWithTransform
 
+def find_class_to_idx(obj):
+    visited = set()  # avoid infinite loops
+
+    current = obj
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+
+        # Found it
+        if hasattr(current, "class_to_idx"):
+            return current.class_to_idx
+
+        # Try common container attributes
+        for attr in ("dataset", "subset", "datasets", "wrapped"):
+            if hasattr(current, attr):
+                current = getattr(current, attr)
+                break
+        else:
+            # none of those attributes existed → stop
+            return None
+
+    return None
+
 # --- Multilabel Helper ---
 class CompactMultilabelEncoder:
     def __init__(self, dataset, num_binary_classes):
@@ -59,17 +81,25 @@ class CompactMultilabelEncoder:
 def load_user_dataset(dataset):
     print(f"Loading dataset: {dataset}...")
     
-    data_class = DataLoading(dataset=dataset, validontest=False)
+    data_class = DataLoading(dataset=dataset, validontest=args.validontest)
     data_class.create_transforms(train_aug_strat_orig='None', train_aug_strat_gen='None')
     
     #Adjust training image preprocessing. 
     #Normally uses lower-size training images (FixRes recipe) and random resized crop that are different to test transforms.
     #This could induce bias, hence we now use the test images preprocessing on train image as well.
     #Distance is measured with those transforms for later evaluation on test images.
-    if dataset in ['Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 'TreeSAT']:
+    if dataset in ['Casting-Product-Quality', 'Describable-Textures', 'TreeSAT']:
         data_class.transforms_preprocess_train = transforms.Compose([transforms.Resize(272, antialias=True), 
                                                                     transforms.CenterCrop(256)])
         imagesize = 256
+        multilabel = False
+    elif dataset in ['Flickr-Material']:
+        data_class.transforms_preprocess_train = transforms.Compose([transforms.RandomResizedCrop(256, antialias=True)])
+        imagesize = 256
+        multilabel = False
+    elif dataset in ['NEU-surface-defect']:
+        data_class.transforms_preprocess_train = transforms.Compose([transforms.RandomResizedCrop(128, antialias=True)])
+        imagesize = 128
         multilabel = False
     elif dataset in ['GTSRB']:
         data_class.transforms_preprocess_train = transforms.Compose([transforms.ToImage(), 
@@ -150,6 +180,7 @@ def load_user_dataset(dataset):
                 ])
         imagesize = 64
         multilabel = True
+        class_to_idx = data_class.num_classes #number of binary classes
     elif dataset in ['PCAM']:
         #getting rid of any random padding
         data_class.transforms_preprocess_train = transforms.Compose([transforms.CenterCrop(64)])
@@ -161,29 +192,8 @@ def load_user_dataset(dataset):
     data_class.load_base_data()
     trainset = SubsetWithTransform(data_class.base_trainset, data_class.transforms_preprocess_train)
 
-    if dataset in ['Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 'TreeSAT']:
-        if hasattr(trainset, 'class_to_idx'):
-            # This works if user_trainset is the main dataset (e.g., ImageFolder)
-            class_to_idx = trainset.class_to_idx
-        elif hasattr(trainset, 'dataset') and hasattr(trainset.dataset, 'class_to_idx'):
-            # This works if user_trainset is a torch.utils.data.Subset
-            # The original dataset is stored in the .dataset attribute
-            class_to_idx = trainset.dataset.class_to_idx
-        elif hasattr(trainset, 'subset') and hasattr(trainset.subset, 'class_to_idx'):
-            # This works if user_trainset is a torch.utils.data.Subset
-            # The original dataset is stored in the .dataset attribute
-            class_to_idx = trainset.subset.class_to_idx
-        elif hasattr(trainset, 'subset') and hasattr(trainset.subset, 'dataset') and hasattr(trainset.subset.dataset, 'class_to_idx'):
-            # This works if user_trainset is a torch.utils.data.Subset
-            # The original dataset is stored in the .dataset attribute
-            class_to_idx = trainset.subset.dataset.class_to_idx
-        else:
-            # If this fails, your object is neither a dataset with class_to_idx
-            # nor a Subset of one.
-            raise AttributeError("Could not find 'class_to_idx' attribute on "
-                                "user_trainset or user_trainset.dataset")
-    elif dataset in ['WaferMap']:
-        class_to_idx = data_class.num_classes  #number of binary classes
+    if dataset in ['Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 'TreeSAT', 'NEU-surface-defect']:
+        class_to_idx = find_class_to_idx(trainset)
 
     return trainset, imagesize, multilabel, class_to_idx
 
@@ -219,36 +229,38 @@ def main(args):
 
     # --- 3. Iterate, Save Images, and Build Label List ---
     for i in tqdm(range(len(user_trainset)), desc="Preprocessing images"):
-        image_tensor, label = user_trainset[i]
-        
-        # Get Class ID and Folder Name
-        if multilabel:
-            class_id = id_encoder.multilabel_to_id(label)
-            class_name_str = '-'.join(str(int(x)) for x in label)
-        else:
-            class_id = int(label)
-            class_name_str = str(class_id)
+        for v in range(args.num_variants):
+            image_tensor, label = user_trainset[i]
             
-        # Create Class Subfolder
-        class_dir = os.path.join(data_dir, class_name_str)
-        os.makedirs(class_dir, exist_ok=True)
-        
-        # Process Image
-        if image_tensor.min() < 0:
-             image_tensor = (image_tensor + 1) / 2.0
-        
-        pil_image = save_transform(image_tensor)
-        if pil_image.mode != 'RGB':
-            pil_image = pil_image.convert('RGB')
+            # Get Class ID and Folder Name
+            if multilabel:
+                class_id = id_encoder.multilabel_to_id(label)
+                class_name_str = '-'.join(str(int(x)) for x in label)
+            else:
+                class_id = int(label)
+                class_name_str = str(class_id)
+                
+            # Create Class Subfolder
+            class_dir = os.path.join(data_dir, class_name_str)
+            os.makedirs(class_dir, exist_ok=True)
             
-        filename = f'img_{i:06d}.png'
-        save_path = os.path.join(class_dir, filename)
-        pil_image.save(save_path)
-        
-        # Add to NVIDIA Label List
-        # Path must be relative to dataset root: "class_folder/filename.png"
-        relative_path = f"{class_name_str}/{filename}"
-        dataset_json_labels.append([relative_path, class_id])
+            # Process Image
+            if image_tensor.min() < 0:
+                image_tensor = (image_tensor + 1) / 2.0
+            
+            pil_image = save_transform(image_tensor)
+            if pil_image.mode != 'RGB':
+                pil_image = pil_image.convert('RGB')
+
+            # include variant index in filename so each saved image is unique
+            filename = f'img_{i:06d}_v{v:02d}.png'
+            save_path = os.path.join(class_dir, filename)
+            pil_image.save(save_path)
+            
+            # Add to NVIDIA Label List
+            # Path must be relative to dataset root: "class_folder/filename.png"
+            relative_path = f"{class_name_str}/{filename}"
+            dataset_json_labels.append([relative_path, class_id])
 
     # --- 4. Save NVIDIA's dataset.json (REQUIRED FOR TRAINING) ---
     # This goes INSIDE the gan_data_dir
@@ -272,7 +284,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', type=str, default='GTSRB', help="Name of the dataset to preprocess")
+    parser.add_argument('--dataset_name', type=str, default='NEU-surface-defect', help="Name of the dataset to preprocess")
     parser.add_argument('--gan_data_dir', type=str, default='../data', help="Folder for images")
+    parser.add_argument('--num_variants', type=int, default=20, help="Number of variants per source image")
+    parser.add_argument('--validontest', type=bool, default=True, help="Whether to use all training data or split off validation data")
     args = parser.parse_args()
     main(args)

@@ -112,7 +112,7 @@ def plot_images(
     fig, axs = plt.subplots(
         number,
         columns,
-        figsize=(6 * columns, number * 2),
+        figsize=(2 * columns, number * 2),
         squeeze=False
     )
 
@@ -572,7 +572,7 @@ class TestTracking:
                 if self.dataset in ['CIFAR10', 'CIFAR100', 'GTSRB', 'WaferMap']:
                     test_corruptions_bar_label = np.loadtxt(os.path.abspath(f'{self.c_labels_path}/c-bar-labels-cifar.txt'), dtype=list)
                 elif self.dataset in ['ImageNet', 'ImageNet-100', 'TinyImageNet', 'EuroSAT', 'PCAM', 'SynthiCAD',
-                       'TreeSAT', 'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material']:
+                       'TreeSAT', 'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 'NEU-surface-defect']:
                     test_corruptions_bar_label = np.loadtxt(os.path.abspath(f'{self.c_labels_path}/c-bar-labels-IN.txt'), dtype=list)
                 else:
                     print('no c-bar corruption types defined for this dataset')

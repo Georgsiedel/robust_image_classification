@@ -3,6 +3,7 @@ import os
 import time
 import json
 import gc
+from pathlib import Path
 
 import torch
 import torchvision.transforms.v2 as transforms
@@ -213,6 +214,9 @@ class DataLoading():
             #no tensor because HDF5 dataset class or Imagefolder with kornia loader (tensor output)
             self.transforms_preprocess_train = transforms.Compose([rrc176]) #rrc224 rrc176
             self.transforms_preprocess_test = transforms.Compose([r232, cc224])
+        elif self.dataset in ['NEU-surface-defect']:
+            self.transforms_preprocess_train = transforms.Compose([transforms.RandomResizedCrop(112, antialias=True)])
+            self.transforms_preprocess_test = transforms.Compose([transforms.Resize(128, antialias=True)])
         elif self.dataset in ['SynthiCAD']:
             #no tensor because HDF5 dataset class or Imagefolder with kornia loader (tensor output)
             self.transforms_preprocess_train = transforms.Compose([rrc176, 
@@ -263,7 +267,7 @@ class DataLoading():
         basic_list = []
         if self.dataset not in ['GTSRB']:
             basic_list.append(flip)
-        if self.dataset in ['TreeSAT', 'Casting-Product-Quality', 'SynthiCAD','EuroSAT','PCAM','WaferMap','Describable-Textures']:
+        if self.dataset in ['TreeSAT', 'Casting-Product-Quality', 'SynthiCAD','EuroSAT','PCAM','WaferMap','Describable-Textures','NEU-surface-defect']:
             basic_list.append(flip_v)
         if self.dataset in ['CIFAR10', 'CIFAR100', 'GTSRB']:
             basic_list.append(c32)
@@ -333,7 +337,7 @@ class DataLoading():
 
         if self.validontest:
 
-            if self.dataset in ['ImageNet']:
+            if self.dataset in ['ImageNet', 'NEU-surface-defect']:
                 self.testset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/val'),
                                                                 transform=self.transforms_preprocess_test,
                                                                 loader=custom_transforms.safe_loader
@@ -474,7 +478,7 @@ class DataLoading():
             self.num_classes = extract_num_classes(self.testset)
 
         else:
-            if self.dataset in ['ImageNet']:
+            if self.dataset in ['ImageNet', 'NEU-surface-defect']:
                 base_trainset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/train'),
                                                                 loader=custom_transforms.safe_loader)
             elif self.dataset in ['TinyImageNet', 'ImageNet-100', 'TreeSAT', 'Casting-Product-Quality', 'KITTI_RoadLane']:
@@ -605,9 +609,18 @@ class DataLoading():
                         self.generated_dataset = np.load(os.path.abspath(f'{self.data_path}/{self.dataset}-add-1m-dm.npz'),
                                                 mmap_mode='r') 
                         self.generated_dataset_length = len(self.generated_dataset['label'])
-                    else:
-                        self.generated_dataset = NumericFolderKorniaDataset(root=os.path.abspath(f'{self.data_path}/{self.dataset}_GAN'),
-                                                                            multilabel=self.multilabel)
+                    else: 
+                        root = Path(self.data_path) / f"{self.dataset}_GAN"
+                        valid_root = Path(self.data_path) / f"{self.dataset}_GAN_valid"
+                        
+                        if self.validontest == False and valid_root.exists():          
+                            # Try to find GAN data that left out the valid split for training to not overfit here
+                            root = valid_root
+ 
+                        self.generated_dataset = NumericFolderKorniaDataset(
+                            root=root.resolve(),
+                            multilabel=self.multilabel,
+                        )
                         self.generated_dataset_length = len(self.generated_dataset)
                     self.generated_ratio = generated_ratio
                 except:

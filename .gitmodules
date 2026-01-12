@@ -10,3 +10,6 @@
 [submodule "KITTI-distance-estimation"]
 	path = KITTI-distance-estimation
 	url = https://github.com/georgsiedel/KITTI-distance-estimation.git
+[submodule "stylegan3"]
+	path = stylegan3
+	url = https://github.com/Georgsiedel/stylegan3

@@ -18,7 +18,7 @@ minibatchsize = 8
 #ImageNet ImageNet-100 TreeSAT Describable-Textures Flickr-Material KITTI_RoadLane KITTI_Distance_Multiclass 
 # CIFAR100 CIFAR10 TinyImageNet PCAM GTSRB WaferMap EuroSAT SynthiCAD
 dataset = 'GTSRB' 
-generated_ratio = 0.1
+generated_ratio = 0.0
 normalize = True
 validontest = True
 validonc = True

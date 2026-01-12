@@ -307,8 +307,8 @@ def sample_lp_corr_batch(noise_type, epsilon, batch, density_distribution_max, m
 
 if __name__ == '__main__':
 
-    dataset='KITTI_RoadLane'
-    test_corruption = {'noise_type': 'uniform-linf', 'epsilon': 0.04, 'sphere': True, 'distribution': 'max'},
+    dataset='PCAM'
+    test_corruption = {'noise_type': 'uniform-l0.5', 'epsilon': 700000.0, 'sphere': True, 'distribution': 'max'},
 
     Dataloader = DataLoading(dataset=dataset, validontest=True, resize=False, 
                                 run=0, number_workers=0, kaggle=False)
@@ -328,4 +328,4 @@ if __name__ == '__main__':
             inputs_pert = apply_noise(inputs_pert, 1, test_corruption, 1, False, dataset)
             break
 
-    plot_images(3, inputs, corrupted_images=inputs_pert, save=True)
+    plot_images(2, inputs, corrupted_images=inputs_pert, save=True)
