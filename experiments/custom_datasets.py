@@ -13,6 +13,7 @@ import json
 import h5py
 import kornia
 from collections import defaultdict, Counter
+from torchvision.io import decode_image, ImageReadMode
 
 def extract_gtsrb_validsplit_according_to_tracks(base_trainset,
                                                 testsplit,
@@ -416,8 +417,7 @@ class HDF5ImageDataset(Dataset):
         # wipe out any h5py objects to avoid pickling errors
         def is_h5py_obj(x):
             try:
-                import h5py as _h5
-                return isinstance(x, (_h5.File, _h5.Dataset, _h5.Group))
+                return isinstance(x, (h5py.File, h5py.Dataset, h5py.Group))
             except Exception:
                 return False
 
@@ -441,6 +441,124 @@ class HDF5ImageDataset(Dataset):
                     fh.close()
             except Exception:
                 pass
+
+class HDF5ImageDataset_raw(Dataset):
+    """
+    High-Performance HDF5 Dataset for Raw JPEG Bytes.
+    Safe for pickling (Multi-GPU/DataLoader friendly).
+    """
+
+    def __init__(self, path_images, path_labels=None, transform=None, 
+                 pil_instead_of_tensor: bool = False):
+        self.path_images = path_images
+        self.path_labels = path_labels
+        self.transform = transform
+        self.pil_instead_of_tensor = pil_instead_of_tensor
+
+        # File handles (lazy load)
+        self._fh_img = None
+        self._fh_lbl = None
+        
+        # Determine Keys and Length immediately
+        if self.path_labels is None:
+            self._key_lbl = "labels"
+            self._key_img = "images"
+        else:
+            self._key_lbl = "y"
+            self._key_img = "x"
+
+        # Probe file once to get metadata
+        with h5py.File(self.path_images, "r") as f:
+            self._length = f[self._key_img].shape[0]
+
+            # Load metadata
+            if "class_to_idx" in f.attrs:
+                self.class_to_idx = json.loads(f.attrs["class_to_idx"])
+            elif "label_names" in f.attrs:
+                self.label_names = json.loads(f.attrs["label_names"])
+
+    def __len__(self):
+        return self._length
+
+    def __getitem__(self, idx):
+        # 1. Lazy Open (One handle per worker process)
+        if self._fh_img is None:
+            self._fh_img = h5py.File(self.path_images, "r")
+            self._dset_img = self._fh_img[self._key_img]
+        
+        if self.path_labels is not None and self._fh_lbl is None:
+            self._fh_lbl = h5py.File(self.path_labels, "r")
+            self._dset_lbl = self._fh_lbl[self._key_lbl]
+        else:
+            self._dset_lbl = self._fh_img[self._key_lbl]
+
+        # 2. Retrieve Data
+        # Get raw bytes from HDF5 (returned as numpy uint8 array)
+        img_bytes_np = self._dset_img[idx]
+        lbl_entry = self._dset_lbl[idx]
+
+        # 3. Decode Image
+        if self.pil_instead_of_tensor:
+            # Fallback: Convert bytes -> PIL
+            # Note: This is slower than decode_image, but required for some legacy transforms
+            img = Image.open(io.BytesIO(img_bytes_np)).convert("RGB")
+        else:
+            # Fast Path: Torchvision C++ Decoder
+            # Zero-copy from numpy to torch tensor
+            img_tensor_buffer = torch.from_numpy(img_bytes_np)
+            
+            # Decode JPEG/PNG -> Tensor [3, H, W]
+            # mode=ImageReadMode.RGB ensures 3 channels (handles grayscale automatically)
+            img = decode_image(img_tensor_buffer, mode=ImageReadMode.RGB)
+
+            # Convert to float32 [0, 1] range standard for PyTorch transforms
+            # (decode_image returns uint8 [0, 255])
+            img = img.to(dtype=torch.float32).div(255.0)
+
+        # 4. Handle Labels (Scalar vs Multi-label)
+        if isinstance(lbl_entry, np.ndarray):
+            if lbl_entry.size == 1:
+                # Single Scalar Label
+                label = int(lbl_entry.item())
+            else:
+                # Multi-label / Tensor
+                label = torch.from_numpy(lbl_entry.astype(np.float32))
+        else:
+            # Scalar types (e.g. h5py returning int32 directly)
+            arr = np.array(lbl_entry)
+            if arr.ndim == 0:
+                label = int(arr.item())
+            else:
+                label = torch.from_numpy(arr.astype(np.float32))
+
+        # 5. Apply Transforms
+        if self.transform is not None:
+            img = self.transform(img)
+
+        return img, label
+
+    # --- Pickling Safety (Same as your original) ---
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove h5py objects
+        for k in ["_fh_img", "_fh_lbl", "_dset_img", "_dset_lbl"]:
+            if k in state:
+                state[k] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._fh_img = None
+        self._fh_lbl = None
+        self._dset_img = None
+        self._dset_lbl = None
+
+    def __del__(self):
+        # Close handles if they exist
+        if hasattr(self, "_fh_img") and self._fh_img is not None:
+            self._fh_img.close()
+        if hasattr(self, "_fh_lbl") and self._fh_lbl is not None:
+            self._fh_lbl.close()
 
 class CustomDataset(Dataset):
     def __init__(self, np_images, testset, resize, preprocessing):

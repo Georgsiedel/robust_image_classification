@@ -17,7 +17,7 @@ def get_criterion(loss_function, lossparams):
     return criterion, test_criterion, robust_samples
 
 class Criterion(nn.Module):
-    def __init__(self, standard_loss, trades_loss=False, beta=1.0, step_size=0.003, epsilon=0.031,
+    def __init__(self, standard_loss, trades_loss=False, fraction=1.0, beta=1.0, step_size=0.003, epsilon=0.031, random_eps=False,
                  perturb_steps=10, distance='l_inf', robust_loss=False, alpha=12, num_splits=3, **kwargs):
         super().__init__()
         loss = getattr(torch.nn, standard_loss)
@@ -31,6 +31,9 @@ class Criterion(nn.Module):
             self.perturb_steps=perturb_steps
             self.beta=beta
             self.distance=distance
+            self.trades_fraction=fraction
+            self.random_eps = random_eps
+            assert 0.0 < self.trades_fraction <= 1.0, "TRADES fraction must be over 0.0 and up to including 1.0"
         if robust_loss == True:
             self.num_splits=num_splits
             self.alpha=alpha
@@ -44,19 +47,34 @@ class Criterion(nn.Module):
 
         return loss
     
-    def add_trades_loss(self, loss, model, optimizer, inputs, targets):
-        split_size = inputs.shape[0] // (self.robust_samples+1)
-
+    def add_trades_loss(self, 
+                        loss, 
+                        model, 
+                        optimizer, 
+                        inputs, 
+                        targets, 
+                        generated_ratio: float):
+        
         if self.trades_loss:
-            trades_loss = trades_loss(model=model, 
-                                      x_natural=inputs[:split_size], 
-                                      y=targets, 
+            # Determine number per original and generated samples, according to ratio
+            # assumes every batch layers original images first, then generated images, as done in data loader
+            split_size = inputs.shape[0] // (self.robust_samples+1)
+            n_generated = int(split_size * generated_ratio)
+            n_original = split_size - n_generated
+            n_trades_total = int(self.trades_fraction * split_size)
+            n_trades_original = int(self.trades_fraction * n_original)
+            start_index = n_original - n_trades_original
+
+            trades_loss = trades(model=model, 
+                                      x_natural=inputs[start_index:start_index + n_trades_total], 
+                                      y=targets[start_index:start_index + n_trades_total], 
                                       optimizer=optimizer, 
                                       step_size=self.step_size,                                 
                                       epsilon=self.epsilon,                                   
                                       perturb_steps=self.perturb_steps,                                    
-                                      beta=self.beta,                                 
-                                      distance=self.distance)
+                                      beta=self.beta * self.trades_fraction, #scales aggressiveness according to fraction                                
+                                      distance=self.distance,
+                                      random_eps=self.random_eps)
             loss += trades_loss
 
         return loss
@@ -87,7 +105,7 @@ def jsd_loss(output, num_splits=3, alpha=12):
         logp_mixture, p_split, reduction='batchmean') for p_split in probs]) / num_splits
     return loss
 
-def trades_loss(model,
+def trades(model,
                 x_natural,
                 y,
                 optimizer,
@@ -95,13 +113,34 @@ def trades_loss(model,
                 epsilon=0.031,
                 perturb_steps=10,
                 beta=1.0,
-                distance='l_inf'):
+                distance='l_inf',
+                random_eps=False):
     # define KL-loss
     criterion_kl = nn.KLDivLoss(reduction='sum')
     model.eval()
     batch_size = len(x_natural)
+    device = x_natural.device
+
+    if random_eps:
+        # u in [0,1], reused for eps and step size
+        u = torch.rand(batch_size, device=device)
+
+        eps = u * epsilon
+        eps_view = eps.view(batch_size, 1, 1, 1)
+
+        step_sizes = u * step_size
+        step_sizes_view = step_sizes.view(batch_size, 1, 1, 1)
+    else:
+        eps = torch.full((batch_size,), epsilon, device=device)
+        eps_view = eps.view(batch_size, 1, 1, 1)
+
+        # standard fixed step size
+        step_sizes = torch.full((batch_size,), step_size, device=device)
+        step_sizes_view = step_sizes.view(batch_size, 1, 1, 1)
+    
     # generate adversarial example
     x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+
     if distance == 'l_inf':
         for _ in range(perturb_steps):
             x_adv.requires_grad_()
@@ -109,8 +148,8 @@ def trades_loss(model,
                 loss_kl = criterion_kl(F.log_softmax(model(x_adv), dim=1),
                                        F.softmax(model(x_natural), dim=1))
             grad = torch.autograd.grad(loss_kl, [x_adv])[0]
-            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
-            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = x_adv.detach() + step_sizes_view * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - eps_view), x_natural + eps_view)
             x_adv = torch.clamp(x_adv, 0.0, 1.0)
     elif distance == 'l_2':
         delta = 0.001 * torch.randn(x_natural.shape).cuda().detach()
@@ -136,10 +175,16 @@ def trades_loss(model,
                 delta.grad[grad_norms == 0] = torch.randn_like(delta.grad[grad_norms == 0])
             optimizer_delta.step()
 
-            # projection
+            # projection with per-sample eps ball
             delta.data.add_(x_natural)
             delta.data.clamp_(0, 1).sub_(x_natural)
-            delta.data.renorm_(p=2, dim=0, maxnorm=epsilon)
+            
+            delta_flat = delta.data.view(batch_size, -1)
+            delta_norms = delta_flat.norm(p=2, dim=1)
+
+            scale = torch.clamp(eps / (delta_norms + 1e-12), max=1.0)
+            delta.data = delta.data * scale.view(batch_size, 1, 1, 1)
+
         x_adv = Variable(x_natural + delta, requires_grad=False)
     else:
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
@@ -149,9 +194,10 @@ def trades_loss(model,
     # zero gradient
     optimizer.zero_grad()
     # calculate robust loss
-    logits = model(x_natural)[0] #changed for ct_model outputs a tuple with mixed_targets
-    loss_natural = F.cross_entropy(logits, y)
+    # natural loss is calculated in the training loop already, we leave it out here
+    #logits = model(x_natural)[0] #changed for ct_model outputs a tuple with mixed_targets
+    #loss_natural = F.cross_entropy(logits, y)
     loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv)[0], dim=1),
                                                     F.softmax(model(x_natural)[0], dim=1))
-    loss = loss_natural + beta * loss_robust
+    loss = beta * loss_robust # + loss_natural
     return loss

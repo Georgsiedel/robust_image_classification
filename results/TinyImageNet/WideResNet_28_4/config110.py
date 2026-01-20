@@ -23,20 +23,20 @@ normalize = True
 validontest = True
 validonc = True
 validonadv = False
-lrschedule = 'CosineAnnealingLR'
+lrschedule = 'CosineAnnealingWarmRestarts'
 learningrate = 0.1
-epochs = 595
-lrparams = {'T_max': 595}
-warmupepochs = 5
+epochs = 1500
+lrparams = {'T_0': 100, 'T_mult': 2}
+warmupepochs = 0
 earlystop = False
 earlystopPatience = 15
 optimizer = 'SGD'
 optimizerparams = {'momentum': 0.9, 'weight_decay': 1e-4, 'nesterov': False}
-number_workers = 0
+number_workers = 2
 modeltype = 'WideResNet_28_4'
 modelparams = {'dropout_rate': 0.2}
 resize = False
-aggressive_soft_crop = True
+aggressive_soft_crop = False
 style_orig = {'probability': 0.2, 'alpha_min': 1.0, 'alpha_max': 1.0}
 style_gen = {'probability': 0.2, 'alpha_min': 0.1, 'alpha_max': 1.0}
 train_aug_strat_orig = 'TrivialAugmentWide' #TrivialAugmentWide, RandAugment, AutoAugment, AugMix
@@ -54,7 +54,7 @@ cutmix = {'alpha': 1.0, 'p': 0.0} # default alpha 1.0 #If both mixup and cutmix 
 manifold = {'apply': False, 'noise_factor': 3}
 n2n_deepaugment = False
 RandomEraseProbability = 0.0
-swa = {'apply': True, 'start_factor': 0.8, 'lr_factor': 0.2}
+swa = {'apply': True, 'start_factor': 0.95, 'lr_factor': 0.1}
 
 #define train and test corruptions:
 #define noise type (first column): 'gaussian', 'uniform-l0-impulse', 'uniform-l0-salt-pepper', 'uniform-linf'. also: all positive numbers p>0 for uniform Lp possible: 'uniform-l1', 'uniform-l2', ...

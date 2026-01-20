@@ -15,8 +15,10 @@ import numpy as np
 import experiments.custom_transforms as custom_transforms
 from run_0 import device
 from experiments.utils import plot_images, CsvHandler
-from experiments.custom_datasets import SubsetWithTransform, NumpyDataset, AugmentedDataset, HDF5ImageDataset, CustomDataset, NumericFolderKorniaDataset
-from experiments.custom_datasets import BalancedRatioSampler, BasicAugmentedDataset, StyleDataset, extract_gtsrb_validsplit_according_to_tracks
+from experiments.custom_datasets import SubsetWithTransform, NumpyDataset, AugmentedDataset, HDF5ImageDataset
+from experiments.custom_datasets import HDF5ImageDataset_raw, CustomDataset, NumericFolderKorniaDataset, BasicAugmentedDataset 
+from experiments.custom_datasets import BalancedRatioSampler, StyleDataset, extract_gtsrb_validsplit_according_to_tracks
+
 
 def normalization_values(batch, dataset, normalized, manifold=False, manifold_factor=1, verbose=False):
 
@@ -355,6 +357,7 @@ class DataLoading():
                     self.base_trainset = None
                 else:
                     self.base_trainset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_train.h5')
+                    #self.base_trainset = HDF5ImageDataset_raw(f'{self.data_path}/{self.dataset}/{self.dataset}_train_raw.h5')
 
             elif self.dataset in ['CIFAR10', 'CIFAR100']:
                 load_helper = getattr(torchvision.datasets, self.dataset)
@@ -379,7 +382,6 @@ class DataLoading():
                 self.testset = HDF5ImageDataset(f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_test_x.h5',
                                                 f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_test_y.h5',
                                                 transform=self.transforms_preprocess_test)
-                
                 if test_only:
                     self.base_trainset = None
                 else:
@@ -511,7 +513,7 @@ class DataLoading():
                                                 f'{self.data_path}/{self.dataset.lower()}/camelyonpatch_level_2_split_valid_y.h5', 
                                                 transform=self.transforms_preprocess_test)
                     
-                self.num_classes = extract_num_classes(self.testset)
+                self.num_classes = 2
                 return  #already features train/val split, so we can return
             elif self.dataset in ['SynthiCAD']:
                 self.testset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_valid.h5',
@@ -770,7 +772,9 @@ class DataLoading():
 
         # --- Precompute only if NOT loaded from repo ---
         if valid_run and not loaded_from_repo:
-            batch_size = min(200, subsetsize)
+            
+            
+            batch_size = min(100, subsetsize)
 
             workers = (
                 self.number_workers
@@ -919,7 +923,7 @@ class DataLoading():
 
         self.trainloader = DataLoader(self.trainset, pin_memory=True, batch_sampler=self.CustomSampler,
                                     num_workers=self.number_workers, worker_init_fn=seed_worker, 
-                                    generator=g, persistent_workers=False)
+                                    generator=g, persistent_workers=True)
         
         val_workers = self.number_workers if self.dataset in ['ImageNet', 'ImageNet-100', 'TreeSAT', 'Casting-Product-Quality', 
                        'Describable-Textures', 'SynthiCAD', 'KITTI_RoadLane', 'KITTI_Distance_Multiclass'] else 0
@@ -954,6 +958,6 @@ class DataLoading():
         g.manual_seed(self.epoch + self.epochs * self.run)
         self.trainloader = DataLoader(self.trainset, batch_sampler=self.CustomSampler, pin_memory=True, 
                                       num_workers=self.number_workers, worker_init_fn=seed_worker,
-                                      generator=g, persistent_workers=False)
+                                      generator=g, persistent_workers=True)
         
         return self.trainloader

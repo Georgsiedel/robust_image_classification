@@ -218,7 +218,7 @@ def train_epoch(pbar):
             loss = criterion.calculate_standard_and_robust_loss(outputs, mixed_targets)
 
             with torch.amp.autocast(device_type=device, enabled=False): # recommended for numerical stability
-                loss = criterion.add_trades_loss(loss, model, optimizer, inputs, targets)
+                loss = criterion.add_trades_loss(loss, model, optimizer, inputs, targets, Dataloader.generated_ratio)
 
         Scaler.scale(loss).backward()
         Scaler.unscale_(optimizer)
@@ -341,8 +341,9 @@ if __name__ == '__main__':
     Dataloader.load_base_data(test_only=False)
     #updating soft_crop if given so that chance = 1 / num_classes (num_classes is loaded only upon base_data loading)
     Dataloader.update_transforms(aggressive_soft_crop=args.aggressive_soft_crop) 
+    size = 32 if args.dataset in ['KITTI_Distance_Multiclass'] else min(200, int(len(Dataloader.testset)/10))
     testsets_c = (Dataloader.load_data_c(subset=True, 
-                                         subsetsize=min(200, int(len(Dataloader.testset)/10)), 
+                                         subsetsize=size, 
                                          valid_run=True) 
                     if args.validonc else None)
     
