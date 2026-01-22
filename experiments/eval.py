@@ -157,7 +157,7 @@ if __name__ == '__main__':
                 
                 testsets_c = Dataloader.load_data_c(subset=subset, subsetsize=subsetsize, valid_run=False,
                                                     load_root="../data")
-                if args.experiment in [389,550,124]:
+                if args.experiment in [389]:
                     root="../data"
                 else:
                     root=None

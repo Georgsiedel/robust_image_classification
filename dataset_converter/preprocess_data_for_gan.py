@@ -171,13 +171,6 @@ def load_user_dataset(dataset):
         }
     elif dataset in ['WaferMap']:
         #getting rid of any random padding
-        data_class.transforms_preprocess_train = transforms.Compose([
-                    transforms.ToImage(), 
-                    transforms.ToDtype(torch.float32), #no scaling
-                    custom_transforms.DivideBy3(),
-                    custom_transforms.ExpandGrayscaleTensorTo3Channels(),
-                    transforms.Pad(6) #our test time transform just pads 6px. 
-                ])
         imagesize = 64
         multilabel = True
         class_to_idx = data_class.num_classes #number of binary classes
@@ -188,6 +181,21 @@ def load_user_dataset(dataset):
         multilabel = False
         class_to_idx = {"negative": 0, 
                         "positive": 1}
+    elif dataset in ['DermaMNIST']:
+        data_class.transforms_preprocess_train = transforms.Compose([transforms.ToImage(), 
+                                                                     transforms.ToDtype(torch.float32, scale=True), 
+                                                                     transforms.RandomCrop(32, padding=4)])
+        imagesize = 32
+        multilabel = False
+        class_to_idx = {
+            'akiec': 0,
+            'bcc': 1,
+            'bkl': 2,
+            'df': 3,
+            'mel': 4,
+            'nv': 5,
+            'vasc': 6
+        }
 
     data_class.load_base_data()
     trainset = SubsetWithTransform(data_class.base_trainset, data_class.transforms_preprocess_train)
@@ -284,9 +292,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', type=str, default='NEU-surface-defect', help="Name of the dataset to preprocess")
+    parser.add_argument('--dataset_name', type=str, default='GTSRB', help="Name of the dataset to preprocess")
     parser.add_argument('--gan_data_dir', type=str, default='../data', help="Folder for images")
-    parser.add_argument('--num_variants', type=int, default=20, help="Number of variants per source image")
+    parser.add_argument('--num_variants', type=int, default=1, help="Number of variants per source image")
     parser.add_argument('--validontest', type=bool, default=True, help="Whether to use all training data or split off validation data")
     args = parser.parse_args()
     main(args)

@@ -16,7 +16,7 @@ import experiments.custom_transforms as custom_transforms
 from run_0 import device
 from experiments.utils import plot_images, CsvHandler
 from experiments.custom_datasets import SubsetWithTransform, NumpyDataset, AugmentedDataset, HDF5ImageDataset
-from experiments.custom_datasets import HDF5ImageDataset_raw, CustomDataset, NumericFolderKorniaDataset, BasicAugmentedDataset 
+from experiments.custom_datasets import CustomDataset, NumericFolderKorniaDataset, BasicAugmentedDataset 
 from experiments.custom_datasets import BalancedRatioSampler, StyleDataset, extract_gtsrb_validsplit_according_to_tracks
 
 
@@ -90,16 +90,16 @@ def extract_num_classes(dataset, labels=None):
     if labels is None:
         labels = extract_labels(dataset)
 
-    # If labels are multilabel vectors (list of arrays/tensors)
+    # If labels are multilabel vectors (list of arrays/tensors)    
     if (
         isinstance(labels, (list, tuple))
         and len(labels) > 0
         and (
-            (hasattr(labels[0], 'ndim') and labels[0].ndim == 1)  # np.ndarray or tensor
-            or (isinstance(labels[0], (list, tuple)) and all(isinstance(x, (int,float)) for x in labels[0]))  # list/tuple of numbers
+            (hasattr(labels[0], 'ndim') and labels[0].ndim == 1 and len(labels[0]) > 1)
+            or (isinstance(labels[0], (list, tuple)) and len(labels[0]) > 1)
         )
     ):
-        return len(labels[0])  # number of classes from length of vector
+        return len(labels[0])
 
     # Otherwise treat as scalar labels, count unique
     unique_labels = set()
@@ -122,7 +122,7 @@ class DataLoading():
         self.number_workers = number_workers
         self.kaggle = kaggle
 
-        if dataset in ['CIFAR10', 'CIFAR100', 'GTSRB','ImageNet', 'ImageNet-100', 'KITTI_RoadLane', 
+        if dataset in ['CIFAR10', 'CIFAR100', 'DermMNIST', 'GTSRB','ImageNet', 'ImageNet-100', 'KITTI_RoadLane', 
                        'KITTI_Distance_Multiclass', 'TreeSAT', 'Casting-Product-Quality', 
                        'Describable-Textures', 'Flickr-Material', 'SynthiCAD']:
             self.factor = 1
@@ -190,6 +190,8 @@ class DataLoading():
         t_no_scaling = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.float32)])
         c32 = transforms.RandomCrop(32, padding=4)
         c64 = transforms.RandomCrop(64, padding=8)
+        p32 = transforms.Pad(2)
+        c32_mnist = transforms.RandomCrop(32, padding=2)
         p64 = transforms.Pad(6)
         c64_WM = transforms.RandomCrop(64, padding=6)
         c96 = transforms.RandomCrop(96, padding=12)
@@ -228,10 +230,12 @@ class DataLoading():
         elif self.dataset in ['KITTI_RoadLane', 'KITTI_Distance_Multiclass']: #no tensor because HDF5 dataset class
             self.transforms_preprocess_train = transforms.Compose([r320])
             self.transforms_preprocess_test = transforms.Compose([r384])
-
         elif self.dataset == 'GTSRB':
             self.transforms_preprocess_train = transforms.Compose([t, r32])
             self.transforms_preprocess_test = transforms.Compose([t, r32])
+        elif self.dataset in ['DermaMNIST']:
+            self.transforms_preprocess_train = transforms.Compose([t, p32])
+            self.transforms_preprocess_test = transforms.Compose([t, p32])
         elif self.dataset == 'WaferMap':
             #https://github.com/Junliangwangdhu/WaferMap/tree/master
             self.transforms_preprocess_train = transforms.Compose([
@@ -269,7 +273,7 @@ class DataLoading():
         basic_list = []
         if self.dataset not in ['GTSRB']:
             basic_list.append(flip)
-        if self.dataset in ['TreeSAT', 'Casting-Product-Quality', 'SynthiCAD','EuroSAT','PCAM','WaferMap','Describable-Textures','NEU-surface-defect']:
+        if self.dataset in ['TreeSAT', 'Casting-Product-Quality', 'SynthiCAD','EuroSAT','PCAM','WaferMap','Describable-Textures','NEU-surface-defect', 'DermaMNIST']:
             basic_list.append(flip_v)
         if self.dataset in ['CIFAR10', 'CIFAR100', 'GTSRB']:
             basic_list.append(c32)
@@ -277,6 +281,8 @@ class DataLoading():
             basic_list.append(c64)
         elif self.dataset == 'WaferMap':
             basic_list.append(c64_WM)
+        elif self.dataset in ['DermaMNIST']:
+            basic_list.append(c32_mnist)
 
         if (self.resize or aggressive_soft_crop):
             # remove crop/resize logic entirely
@@ -339,25 +345,26 @@ class DataLoading():
 
         if self.validontest:
 
-            if self.dataset in ['ImageNet', 'NEU-surface-defect']:
+            if self.dataset in ['ImageNet']:
                 self.testset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/val'),
                                                                 transform=self.transforms_preprocess_test,
-                                                                loader=custom_transforms.safe_loader
+                                                                loader=custom_transforms.safe_kornia_loader
                                                                 )
                 if test_only:
                     self.base_trainset = None
                 else:
                     self.base_trainset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/train'),
-                                                                loader=custom_transforms.safe_loader)
+                                                                loader=custom_transforms.safe_kornia_loader)
 
-            elif self.dataset in ['TinyImageNet', 'ImageNet-100']:
+            elif self.dataset in ['TinyImageNet', 'ImageNet-100', 'NEU-surface-defect']:
                 self.testset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_val.h5',
                                                 transform=transforms.Compose([self.transforms_preprocess_test]))
                 if test_only:
                     self.base_trainset = None
                 else:
-                    self.base_trainset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_train.h5')
-                    #self.base_trainset = HDF5ImageDataset_raw(f'{self.data_path}/{self.dataset}/{self.dataset}_train_raw.h5')
+                    #self.base_trainset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_train.h5')
+                    self.base_trainset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/train'),
+                                                                loader=custom_transforms.safe_kornia_loader)
 
             elif self.dataset in ['CIFAR10', 'CIFAR100']:
                 load_helper = getattr(torchvision.datasets, self.dataset)
@@ -376,6 +383,24 @@ class DataLoading():
                     self.base_trainset = None
                 else:
                     self.base_trainset = load_helper(root=os.path.abspath(f'{self.data_path}'), split='train', download=True)
+
+            elif self.dataset in ['DermaMNIST']:
+                data=np.load(os.path.join(f'{self.data_path}/dermamnist.npz'))
+
+                if test_only:
+                    self.base_trainset = None
+                else:
+                    x_train = data["train_images"]
+                    x_val = data["val_images"]
+                    y_train = data["train_labels"].squeeze()
+                    y_val = data["val_labels"].squeeze()
+                    base_trainset = NumpyDataset(x_train, y_train)
+                    base_valset = NumpyDataset(x_val, y_val)
+                    self.base_trainset = ConcatDataset([base_trainset, base_valset])
+                
+                x_test = data["test_images"]
+                y_test  = data["test_labels"].squeeze()
+                self.testset = NumpyDataset(x_test, y_test, self.transforms_preprocess_test) #transforms already done
 
             elif self.dataset in ['PCAM']:               
                 
@@ -480,10 +505,10 @@ class DataLoading():
             self.num_classes = extract_num_classes(self.testset)
 
         else:
-            if self.dataset in ['ImageNet', 'NEU-surface-defect']:
+            if self.dataset in ['ImageNet']:
                 base_trainset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}/train'),
-                                                                loader=custom_transforms.safe_loader)
-            elif self.dataset in ['TinyImageNet', 'ImageNet-100', 'TreeSAT', 'Casting-Product-Quality', 'KITTI_RoadLane']:
+                                                                loader=custom_transforms.safe_kornia_loader)
+            elif self.dataset in ['TinyImageNet', 'ImageNet-100', 'TreeSAT', 'Casting-Product-Quality', 'KITTI_RoadLane', 'NEU-surface-defect']:
                 base_trainset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_train.h5')
             elif self.dataset in ['CIFAR10', 'CIFAR100']:
                 load_helper = getattr(torchvision.datasets, self.dataset)
@@ -515,6 +540,24 @@ class DataLoading():
                     
                 self.num_classes = 2
                 return  #already features train/val split, so we can return
+            
+            elif self.dataset in ['DermaMNIST']:
+
+                data=np.load(os.path.join(f'{self.data_path}/dermamnist.npz'))
+
+                if test_only:
+                    self.base_trainset = None
+                else:
+                    x_train = data["train_images"]
+                    y_train = data["train_labels"].squeeze()
+                    self.base_trainset = NumpyDataset(x_train, y_train)
+                
+                x_val = data["val_images"]
+                y_val = data["val_labels"].squeeze()
+                self.testset = NumpyDataset(x_val, y_val, self.transforms_preprocess_test) #transforms already done
+                self.num_classes = 7
+                return #already features train/val split, so we can return
+
             elif self.dataset in ['SynthiCAD']:
                 self.testset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}/{self.dataset}_valid.h5',
                                                 transform=self.transforms_preprocess_test)
@@ -605,19 +648,30 @@ class DataLoading():
                     if self.dataset == "ImageNet-100":
                         self.generated_dataset = HDF5ImageDataset(f'{self.data_path}/{self.dataset}-add-1m-dm.h5')
                         #self.generated_dataset = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-synthetic'),
-                        #                                                loader=custom_transforms.safe_loader)
+                        #                                                loader=custom_transforms.safe_kornia_loader)
                         self.generated_dataset_length = len(self.generated_dataset)
                     elif self.dataset in ["CIFAR100", "CIFAR10", 'TinyImageNet']:
                         self.generated_dataset = np.load(os.path.abspath(f'{self.data_path}/{self.dataset}-add-1m-dm.npz'),
                                                 mmap_mode='r') 
                         self.generated_dataset_length = len(self.generated_dataset['label'])
                     else: 
-                        root = Path(self.data_path) / f"{self.dataset}_GAN"
+                        # Base GAN paths
+                        gan_balanced_root = Path(self.data_path) / f"{self.dataset}_GAN_balanced"
+                        gan_root = Path(self.data_path) / f"{self.dataset}_GAN"
+                        valid_balanced_root = Path(self.data_path) / f"{self.dataset}_GAN_valid_balanced"
                         valid_root = Path(self.data_path) / f"{self.dataset}_GAN_valid"
-                        
-                        if self.validontest == False and valid_root.exists():          
-                            # Try to find GAN data that left out the valid split for training to not overfit here
-                            root = valid_root
+
+                        # Try to find GAN data that left out the valid split for training to not overfit here
+                        if self.validontest == False and valid_balanced_root.exists():
+                            # prefer balanced GAN if it exists, else fallback to normal GAN
+                            root = valid_balanced_root
+                        elif self.validontest == False and valid_root.exists():
+                            root = valid_root   
+                        # Prefer balanced GAN if it exists, else fallback to normal GAN
+                        elif gan_balanced_root.exists():
+                            root = gan_balanced_root
+                        else:
+                            root = gan_root
  
                         self.generated_dataset = NumericFolderKorniaDataset(
                             root=root.resolve(),
@@ -781,7 +835,7 @@ class DataLoading():
                 if corruption in ['caustic_refraction', 'perlin_noise',
                                 'plasma_noise', 'sparkles']
                 and self.dataset not in ['CIFAR10', 'CIFAR100', 'TinyImageNet',
-                                        'EuroSAT', 'WaferMap', 'GTSRB', 'PCAM']
+                                        'EuroSAT', 'WaferMap', 'GTSRB', 'PCAM', 'DermaMNIST']
                 else 0
             )
 
@@ -869,7 +923,7 @@ class DataLoading():
                 if self.validontest:
                     intensity_datasets = [torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-{set}/' + corruption + '/' + str(intensity)),
                                                                         transform=self.transforms_preprocess_test,
-                                                                loader=custom_transforms.safe_loader) for intensity in range(1, 6)]
+                                                                loader=custom_transforms.safe_kornia_loader) for intensity in range(1, 6)]
                     if subset == True and subsetsize < len(self.testset):
                         selected_indices = np.random.choice(len(intensity_datasets[0]), subsetsize, replace=False)
                         intensity_datasets = [Subset(intensity_dataset, selected_indices) for intensity_dataset in intensity_datasets]

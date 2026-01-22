@@ -7,7 +7,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 if __name__ == '__main__':
 
-    for experiment in [136,137,139,141,142,512,513,514,439,440,441,442,443,444,598,599]:#
+    for experiment in [130,131,132,133,134,135,457,458,459,460,512,513,514,439,440,441,442,443,444,598,599,356,357,358,359,360]:#
 
         configname = (f'experiments.configs.config{experiment}')
         config = importlib.import_module(configname)

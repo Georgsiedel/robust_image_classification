@@ -11,7 +11,7 @@ from run_0 import device
 import io
 import json
 import h5py
-import kornia
+import kornia, kornia_rs
 from collections import defaultdict, Counter
 from torchvision.io import decode_image, ImageReadMode
 
@@ -124,7 +124,7 @@ class NumericFolderKorniaDataset(Dataset):
 
     IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
 
-    def __init__(self, root, multilabel=False, transform=None, label_sep="_"):
+    def __init__(self, root, multilabel=False, transform=None, label_sep="_", try_kornia=False):
         self.root = root
         self.transform = transform
         self.samples = []            # list of (path, label) where label is int or torch.tensor
@@ -133,6 +133,7 @@ class NumericFolderKorniaDataset(Dataset):
         self.multilabel = bool(multilabel)
         self.label_sep = label_sep
         self.num_labels = None       # number of label positions in multilabel mode
+        self.try_kornia = try_kornia
 
         # iterate through subdirectories deterministically
         for folder in sorted(os.listdir(root)):
@@ -213,7 +214,12 @@ class NumericFolderKorniaDataset(Dataset):
         path, label = self.samples[idx]
 
         # Load image with Kornia
-        img = kornia.io.load_image(path, kornia.io.ImageLoadType.RGB32)
+        if self.try_kornia:
+            img = kornia.io.load_image(path, kornia.io.ImageLoadType.RGB32)
+        else:
+            img = Image.open(path).convert("RGB")
+            img = np.asarray(img, dtype=np.float32) / 255.0
+            img = torch.from_numpy(img).permute(2, 0, 1)
 
         if self.transform:
             img = self.transform(img)
@@ -940,7 +946,7 @@ class StyleDataset(Dataset):
             for file in os.listdir(root_dir)
             if file.endswith(".jpg")
         ]
-        if dataset_type in ["CIFAR10", "CIFAR100", "GTSRB"]:
+        if dataset_type in ["CIFAR10", "CIFAR100", "GTSRB", 'DermaMNIST']:
             self.transform = transforms.Resize((32, 32), antialias=True)
         elif dataset_type in ["TinyImageNet", "EuroSAT", "Wafermap", "PCAM"]:
             self.transform = transforms.Resize((64, 64), antialias=True)

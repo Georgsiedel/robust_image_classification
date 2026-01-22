@@ -14,7 +14,7 @@ combine_train_corruptions = True #augment the train dataset with all corruptions
 concurrent_combinations = 1 #only has an effect if combine_train_corruption is True
 
 batchsize = 256
-minibatchsize = 8
+minibatchsize = 4
 #ImageNet ImageNet-100 TreeSAT Describable-Textures Flickr-Material KITTI_RoadLane KITTI_Distance_Multiclass 
 # CIFAR100 CIFAR10 TinyImageNet PCAM GTSRB WaferMap EuroSAT SynthiCAD
 dataset = 'TinyImageNet' 

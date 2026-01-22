@@ -569,7 +569,7 @@ class TestTracking:
             test_metrics_string = np.array(['Standard_Acc', 'RMSCE'])
             if self.test_on_c == True:
                 test_corruptions_label = np.loadtxt(os.path.abspath(f'{self.c_labels_path}/c-labels.txt'), dtype=list)
-                if self.dataset in ['CIFAR10', 'CIFAR100', 'GTSRB', 'WaferMap']:
+                if self.dataset in ['CIFAR10', 'CIFAR100', 'GTSRB', 'WaferMap', 'DermaMNIST']:
                     test_corruptions_bar_label = np.loadtxt(os.path.abspath(f'{self.c_labels_path}/c-bar-labels-cifar.txt'), dtype=list)
                 elif self.dataset in ['ImageNet', 'ImageNet-100', 'TinyImageNet', 'EuroSAT', 'PCAM', 'SynthiCAD',
                        'TreeSAT', 'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 'NEU-surface-defect']:

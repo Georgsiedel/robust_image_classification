@@ -112,10 +112,15 @@ class TransformFactory:
 
         return batch_transforms, after_style, after_nostyle
 
-def safe_loader(path):
-    try:
-        return kornia.io.load_image(path) # Kornia: float32, CHW, [0,1]
-    except:
+def safe_kornia_loader(path, try_kornia=False):
+    if try_kornia:
+        try:
+            return kornia.io.load_image(path, kornia.io.ImageLoadType.RGB32) # Kornia: float32, CHW, [0,1]
+        except:
+            img = Image.open(path).convert("RGB")
+            arr = np.asarray(img, dtype=np.float32) / 255.0
+            return torch.from_numpy(arr).permute(2, 0, 1)
+    else:
         img = Image.open(path).convert("RGB")
         arr = np.asarray(img, dtype=np.float32) / 255.0
         return torch.from_numpy(arr).permute(2, 0, 1)
@@ -186,10 +191,10 @@ class DivideBy3:
 def build_transform_c_bar(name, severity, dataset, resize):
     assert dataset in ['CIFAR10', 'CIFAR100', 'ImageNet', 'ImageNet-100', 'TinyImageNet', 'GTSRB', 'PCAM', 
                        'EuroSAT', 'WaferMap', 'Casting-Product-Quality', 'Describable-Textures', 'Flickr-Material', 
-                       'TreeSAT', 'KITTI_Distance_Multiclass', 'KITTI_RoadLane', 'SynthiCAD', 'NEU-surface-defect'],\
+                       'TreeSAT', 'KITTI_Distance_Multiclass', 'KITTI_RoadLane', 'SynthiCAD', 'NEU-surface-defect', 'DermaMNIST'],\
             "Dataset not defined and functionality not explored for c-bar benchmark."
     
-    if dataset in ['CIFAR10', 'CIFAR100', 'GTSRB']: 
+    if dataset in ['CIFAR10', 'CIFAR100', 'GTSRB', 'DermaMNIST']: 
         im_size = 32
     elif dataset in ['TinyImageNet', 'EuroSAT', 'WaferMap', 'PCAM']:
         im_size = 64

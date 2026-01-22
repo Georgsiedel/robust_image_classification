@@ -14,7 +14,7 @@ combine_train_corruptions = True #augment the train dataset with all corruptions
 concurrent_combinations = 1 #only has an effect if combine_train_corruption is True
 
 batchsize = 256
-minibatchsize = 8
+minibatchsize = 4
 #ImageNet ImageNet-100 TreeSAT Describable-Textures Flickr-Material KITTI_RoadLane KITTI_Distance_Multiclass 
 # CIFAR100 CIFAR10 TinyImageNet PCAM GTSRB WaferMap EuroSAT SynthiCAD
 dataset = 'TinyImageNet' 
@@ -31,10 +31,10 @@ warmupepochs = 0
 earlystop = False
 earlystopPatience = 15
 optimizer = 'SGD'
-optimizerparams = {'momentum': 0.9, 'weight_decay': 1e-4, 'nesterov': False}
-number_workers = 2
+optimizerparams = {'momentum': 0.9, 'weight_decay': 1e-4, 'nesterov': True}
+number_workers = 4
 modeltype = 'WideResNet_28_4'
-modelparams = {'dropout_rate': 0.2}
+modelparams = {'dropout_rate': 0.2, 'activation_function': 'silu'}
 resize = False
 aggressive_soft_crop = False
 style_orig = {'probability': 0.2, 'alpha_min': 1.0, 'alpha_max': 1.0}

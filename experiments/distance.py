@@ -215,7 +215,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    for dataset in ['NEU-surface-defect', 'PCAM']:
+    for dataset in ['DermaMNIST']:
         
         for norm_distance in [np.inf, 1, 2]:
             #random seeding for reproducibility (this is only important should random preprocessing be used - 
