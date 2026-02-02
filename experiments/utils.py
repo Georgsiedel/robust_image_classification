@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -152,20 +153,20 @@ def plot_images(
 
 def calculate_steps(trainset, validset, batchsize, epochs, start_epoch, warmupepochs, validonc, swa, swa_start_factor):
     #+0.5 is a way of rounding up to account for the last partial batch in every epoch
-    trainsteps_per_epoch = round(len(trainset) / batchsize + 0.5)
-    validsteps_per_epoch = round(len(validset) / batchsize + 0.5)     
+    trainsteps_per_epoch = int(math.ceil(len(trainset) / batchsize + 0.5))
+    validsteps_per_epoch = int(math.ceil(len(validset) / batchsize + 0.5))
 
     if validonc == True:
         validsteps_per_epoch += 1
 
     if swa == True:
-        total_validsteps = validsteps_per_epoch * int((2-swa_start_factor) * epochs) + warmupepochs
+        total_validsteps = validsteps_per_epoch * int((1-swa_start_factor) * epochs + 2 * warmupepochs + epochs)
     else:
         total_validsteps = validsteps_per_epoch * (epochs + warmupepochs)
     total_trainsteps = trainsteps_per_epoch * (epochs + warmupepochs)
 
     if swa == True:
-        started_swa_epochs = start_epoch - warmupepochs - int(swa_start_factor * epochs) if start_epoch - warmupepochs - int(swa_start_factor * epochs) > 0 else 0
+        started_swa_epochs = start_epoch - int(swa_start_factor * epochs) if start_epoch - warmupepochs - int(swa_start_factor * epochs) > 0 else 0
         start_validsteps = validsteps_per_epoch * (start_epoch + started_swa_epochs)
     else:
         start_validsteps = validsteps_per_epoch * (start_epoch)

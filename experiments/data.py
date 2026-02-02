@@ -285,8 +285,9 @@ class DataLoading():
             basic_list.append(c32_mnist)
 
         if (self.resize or aggressive_soft_crop):
-            # remove crop/resize logic entirely
-            basic_list = [tr for tr in basic_list if tr not in {c32, c64, c64_WM}]
+            # remove crop/resize logic if resizing or soft crop are applied
+            # do not remove for WaferMap and DermaMNIST as padding is necessary to get to 32x32 or 64x64 (generated image size)
+            basic_list = [tr for tr in basic_list if tr not in {c32, c64}]
         
         if basic_list:
             self.transforms_basic = transforms.Compose(basic_list)
