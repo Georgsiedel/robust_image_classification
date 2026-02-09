@@ -61,14 +61,14 @@ swa = {'apply': True, 'start_factor': 0.8, 'lr_factor': 0.2}
 #define intensity (second column): max.-distance of random perturbations for model training and evaluation (gaussian: std-dev; l0: proportion of pixels corrupted; lp: epsilon)
 #define whether density_distribution=max (third column) is True (sample only maximum intensity values) or False (uniformly distributed up to maximum intensity)
 test_corruptions = np.array([
-{'noise_type': 'uniform-l1', 'epsilon': 130.9, 'sphere': False, 'distribution': 'max'},
-{'noise_type': 'uniform-l2', 'epsilon': 2.611, 'sphere': False, 'distribution': 'max'},
-{'noise_type': 'uniform-linf', 'epsilon': 0.1303, 'sphere': False, 'distribution': 'max'},
-{'noise_type': 'uniform-l0.5', 'epsilon': 700000.0, 'sphere': True, 'distribution': 'max'},
-{'noise_type': 'uniform-l1', 'epsilon': 125.0, 'sphere': True, 'distribution': 'max'},
-{'noise_type': 'uniform-l2', 'epsilon': 2.0, 'sphere': True, 'distribution': 'max'},
-{'noise_type': 'uniform-l10', 'epsilon': 0.06, 'sphere': True, 'distribution': 'max'},
-{'noise_type': 'uniform-l50', 'epsilon': 0.04, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-l1', 'epsilon': 8.766, 'sphere': False, 'distribution': 'max'},
+{'noise_type': 'uniform-l2', 'epsilon': 0.2137, 'sphere': False, 'distribution': 'max'},
+{'noise_type': 'uniform-linf', 'epsilon': 0.0163, 'sphere': False, 'distribution': 'max'},
+{'noise_type': 'uniform-l0.5', 'epsilon': 25000.0, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-l1', 'epsilon': 25.0, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-l2', 'epsilon': 0.5, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-l10', 'epsilon': 0.03, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-l50', 'epsilon': 0.02, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-linf', 'epsilon': 0.01, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-l0-impulse', 'epsilon': 0.01, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-l0-impulse', 'epsilon': 0.02, 'sphere': True, 'distribution': 'max'},

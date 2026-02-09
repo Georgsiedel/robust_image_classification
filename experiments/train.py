@@ -183,11 +183,15 @@ def train_epoch(pbar):
         # If not already applied, carry style and augmentation transforms during training here
         if args.stylization_first == False:
             inputs, confidences = Dataloader.during_train_transform(inputs)
+            #robust loss with label smoothing is not implemented, we take only the confidences on clean samples
+            if criterion.robust_samples >= 1:
+                confidences = confidences[:targets.size(0)]
         else:
             confidences = torch.full((inputs.size(0),), 1.0, device=inputs.device, dtype=inputs.dtype)
 
         #returns smoothed labels according to fixed labelsmoothing and soft augmentation confidence
         #handles multilabel case internally, returns one hot labels
+        #DOes not work with JSD loss currently
         targets = Dataloader.during_train_label_transform(targets, confidences)
 
         if style_dataloader:
@@ -447,7 +451,6 @@ if __name__ == '__main__':
     if args.swa['apply'] == True:
         print("Saving final SWA model, one more forward pass to update its BN stats with augmented data from outside the dataloader")
         if criterion.robust_samples >= 1:
-            print('here is wrong')
             SWA_Loader = custom_datasets.SwaLoader(trainloader, args.batchsize, criterion.robust_samples)
             trainloader = SWA_Loader.get_swa_dataloader()
         

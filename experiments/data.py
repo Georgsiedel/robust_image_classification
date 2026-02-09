@@ -869,7 +869,26 @@ class DataLoading():
 
         c_datasets.append(random_corrupted_testset)
         return c_datasets
+    
+    def load_data_a(self):
+        dataset_a = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-A/'),
+                                                                                transform=self.transforms_preprocess_test,
+                                                                        loader=custom_transforms.safe_kornia_loader)
+        original_class_to_idx = self.testset.class_to_idx
+        dataset_a.class_to_idx = original_class_to_idx
+        # ImageFolder stores samples as (path, class_index). 
+        # We must re-map the indices based on the folder names.
+        new_samples = []
+        for path, _ in dataset_a.samples:
+            folder_name = path.split('/')[-2] # Extract folder name from path
+            correct_idx = original_class_to_idx[folder_name]
+            new_samples.append((path, correct_idx))
 
+        dataset_a.samples = new_samples
+        dataset_a.targets = [s[1] for s in new_samples]
+
+        return dataset_a
+                    
     def load_data_c(self, subset, subsetsize, valid_run, load_root='../data'):
 
         c_datasets = []

@@ -87,7 +87,7 @@ class SwaLoader():
         concatenated_batch = []
         for images, label in batch:
             concatenated_batch.extend(images)
-        return torch.stack(concatenated_batch)
+        return torch.stack(concatenated_batch), label
 
     def get_swa_dataloader(self):
         # Create a new DataLoader with the custom collate function

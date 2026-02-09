@@ -111,9 +111,9 @@ def compute_c(loader_c, model, num_classes, criterion = None, multilabel = False
             if corruption_name in ['gaussian_noise','shot_noise','impulse_noise','pixelate','jpeg_compression','defocus_blur',
                                    'glass_blur','motion_blur','zoom_blur','elastic_transform','speckle_noise','gaussian_blur',
                                    'fog','frost','snow','spatter','brightness','contrast','saturate']:
-                save_path = os.path.join(save_root, f"{dataset_name}-c-valid_0/{corruption_name}")#
+                save_path = os.path.join(save_root, f"{dataset_name}-c/{corruption_name}")#
             else:
-                save_path = os.path.join(save_root, f"{dataset_name}-c-bar-valid_0/{corruption_name}")#-valid_0
+                save_path = os.path.join(save_root, f"{dataset_name}-c-bar/{corruption_name}")#-valid_0
             os.makedirs(save_root, exist_ok=True)
 
         uid_counter = 0

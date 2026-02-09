@@ -1,6 +1,6 @@
 ;config_163_avg
 Standard_Acc;99,7862
-RMSCE;0,0228
+RMSCE;0,0227
 gaussian_noise;93,1660
 shot_noise;98,2639
 impulse_noise;98,0508
@@ -35,14 +35,14 @@ Acc_C-original-15;97,6084
 Acc_C-bar-10;91,6540
 Acc_all-ex-pixelwise-noise-24;95,4355
 RMSCE_C;0,0269
-uniform-l1,130.9,False,max;96,4212
-uniform-l2,2.611,False,max;97,2763
-uniform-linf,0.1303,False,max;91,9161
-uniform-l0.5,700000.0,True,max;82,5020
-uniform-l1,125.0,True,max;96,8329
-uniform-l2,2.0,True,max;98,4086
-uniform-l10,0.06,True,max;99,5012
-uniform-l50,0.04,True,max;99,5012
+uniform-l1,8.766,False,max;99,7941
+uniform-l2,0.2137,False,max;99,7862
+uniform-linf,0.0163,False,max;99,7387
+uniform-l0.5,25000.0,True,max;99,7704
+uniform-l1,25.0,True,max;99,7387
+uniform-l2,0.5,True,max;99,7308
+uniform-l10,0.03,True,max;99,6595
+uniform-l50,0.02,True,max;99,6754
 uniform-linf,0.01,True,max;99,7070
 uniform-l0-impulse,0.01,True,max;99,6595
 uniform-l0-impulse,0.02,True,max;99,5645
@@ -86,6 +86,6 @@ uniform-linf,0.05,False,max;98,9311
 uniform-linf,0.1,False,max;95,3919
 uniform-linf,0.2,False,max;82,9929
 uniform-linf,0.5,False,max;46,4687
-Class Separation Robustness;95,2045
-imperceptible Robustness;96,0755
+Class Separation Robustness;99,7730
+imperceptible Robustness;99,7136
 Average p-norm robustness;84,5187

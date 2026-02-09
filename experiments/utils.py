@@ -501,7 +501,12 @@ class TestTracking:
         self.calculate_adv_distance = calculate_adv_distance
         self.calculate_autoattack_robustness = calculate_autoattack_robustness
         self.test_corruptions = test_corruptions
+
         self.adv_distance_params = adv_distance_params
+        # Handle the "False" case by creating a dummy list for iteration
+        if self.adv_distance_params["clever"] == False:
+            self.adv_distance_params["clever_batches"], self.adv_distance_params["clever_samples"] = [0.0], [0.0]
+
         self.kaggle = kaggle
         self.pbt = pbt
         self.pbt_placeholder = 'pbt_' if pbt == True else '' #just to have different filenames for pbt and non-pbt runs
@@ -527,6 +532,8 @@ class TestTracking:
         if test_on_c:
             if dataset in ['KITTI_RoadLane', 'KITTI_Distance_Multiclass']:
                 self.test_count += 24
+            elif dataset in ['ImageNet', 'ImageNet-100']:
+                self.test_count += 35
             else:
                 self.test_count += 34
         if combine_test_corruptions:
@@ -534,7 +541,8 @@ class TestTracking:
         else:
             self.test_count += test_corruptions.shape[0] + 3
         if calculate_adv_distance:
-            self.adv_count = len(self.adv_distance_params["norm"]) * (2+len(self.adv_distance_params["clever_samples"])) + 1
+            self.adv_count = len(self.adv_distance_params["norm"]) * 2 + 1
+            self.adv_count += len(self.adv_distance_params["norm"]) * len(self.adv_distance_params["clever_samples"])
             self.test_count += self.adv_count
         if calculate_autoattack_robustness:
             self.test_count += 1
@@ -583,6 +591,10 @@ class TestTracking:
                 test_metrics_string = np.append(test_metrics_string,
                                                     ['Acc_C-all-19', 'Acc_C-original-15', 'Acc_C-bar-10', 'Acc_all-ex-pixelwise-noise-24', 'RMSCE_C'],
                                                     axis=0)
+                if self.dataset in ['ImageNet', 'ImageNet-100']:
+                    test_metrics_string = np.append(test_metrics_string,
+                                                        ['Acc_A'],
+                                                        axis=0)
 
             if self.calculate_adv_distance == True:
                 test_metrics_string = np.append(test_metrics_string, ['Acc_from_adv_dist_calculation'])
@@ -590,6 +602,7 @@ class TestTracking:
                     test_metrics_string = np.append(test_metrics_string,
                                                         [f'{n}-norm-Mean_adv_dist_with_misclassifications_0',
                                                         f'{n}-norm-Mean_adv_dist_without_misclassifications'], axis=0)
+                for _, n in enumerate(self.adv_distance_params["norm"]):
                     for _, b in enumerate(self.adv_distance_params["clever_samples"]):
                         test_metrics_string = np.append(test_metrics_string,
                                                             [f'{n}-norm-Mean_CLEVER-{b}-samples'], axis=0)
@@ -626,60 +639,60 @@ class TestTracking:
         else:
             self.filenames = [os.path.abspath(f'{self.trained_models_path}/{self.dataset}/{self.modeltype}/{self.pbt_placeholder}config{self.experiment}' \
                    f'_run_{run}.pth')]
-    
             
     def track_results(self, new_results, i):
         
         for element in new_results:
-                self.accs.append(element)
+            self.accs.append(element)
         if i == 1:
             self.all_test_metrics_2[:len(self.accs), self.run] = np.array(self.accs)
         else:
             self.all_test_metrics[:len(self.accs), self.run] = np.array(self.accs)    
 
-    def save_adv_distance(self, dist_sorted, adv_distance_params):
-
+    def save_adv_distance(self, dist_sorted):
         self.adv_report_path = os.path.abspath(f'./results/{self.dataset}/{self.modeltype}/config{self.experiment}_'
-                                  f'run_{self.run}_adversarial_distances.csv')
+                                            f'run_{self.run}_adversarial_distances.csv')
         os.makedirs(os.path.dirname(self.adv_report_path), exist_ok=True)
 
-        if adv_distance_params["clever"] == False:
-            adv_distance_params["clever_batches"], adv_distance_params["clever_samples"] = [0.0], [0.0]
         columns = []
-        for x in adv_distance_params["norm"]:
+        for x in self.adv_distance_params["norm"]:
             columns.append(f"{x}-norm-min-adv-dist")
             columns.extend([f"{x}-norm-PGD-dist", f"{x}-norm-sec-att-dist"])
-            columns.extend([f"{x}-norm-Clever-{y}-samples" for y in adv_distance_params["clever_samples"]])
+            columns.extend([f"{x}-norm-Clever-{y}-samples" for y in self.adv_distance_params["clever_samples"]])
 
-        adv_distance_frame = pd.DataFrame(index=range(adv_distance_params["setsize"]), columns=columns)
+        adv_distance_frame = pd.DataFrame(index=range(self.adv_distance_params["setsize"]), columns=columns)
         col_counter = 0
 
-        for id, n in enumerate(adv_distance_params["norm"]):
+        for id, n in enumerate(self.adv_distance_params["norm"]):
+            # Fill adversarial attack columns (Indices 0-2, 3-5, etc.)
             adv_distance_frame.iloc[:, col_counter:col_counter+3] = dist_sorted[:, id*3:(id+1)*3]
             col_counter += 3
 
-            for j, (batches, samples) in enumerate(zip(adv_distance_params["clever_batches"], adv_distance_params["clever_samples"])):
 
+            for j, (batches, samples) in enumerate(zip(self.adv_distance_params["clever_batches"], self.adv_distance_params["clever_samples"])):
+                
+                # --- Plotting Logic ---
                 indices1 = np.where((dist_sorted[:,id*3+1] <= dist_sorted[:,id*3+2]) & (dist_sorted[:, id*3+1] != 0))[0]
                 indices2 = np.where((dist_sorted[:,id*3+2] < dist_sorted[:,id*3+1]) & (dist_sorted[:, id*3+2] != 0))[0]
-                # Find indices where column id*3+1 is 0 and column id*3+2 is not 0
+                
                 indices_zero1 = np.where((dist_sorted[:,id*3+1] == 0) & (dist_sorted[:,id*3+2] != 0))[0]
-                # Find indices where column id*3+2 is 0 and column id*3+1 is not 0
                 indices_zero2 = np.where((dist_sorted[:,id*3+2] == 0) & (dist_sorted[:,id*3+1] != 0))[0]
-                # Find indices where both are 0 and asign them to PGD attack
                 indices_doublezero = np.where((dist_sorted[:, id * 3 + 2] == 0) & (dist_sorted[:, id * 3 + 1] == 0))[0]
-                # Concatenate the indices with appropriate conditions
+                
                 indices1 = np.concatenate((indices1, indices_zero2, indices_doublezero))
                 indices2 = np.concatenate((indices2, indices_zero1))
 
                 adv_fig = plt.figure(figsize=(15, 5))
                 plt.scatter(indices1, dist_sorted[:,id*3+1][indices1], s=5, label="PGD Adversarial Distance")
                 plt.scatter(indices2, dist_sorted[:,id*3+2][indices2], s=5, label="Second Attack Adversarial Distance")
-                if adv_distance_params["clever"]:
-                    plt.scatter(range(len(dist_sorted[:,len(adv_distance_params["norm"]) * 3 + id *
-                                                        len(adv_distance_params["clever_batches"]) + j])),
-                                dist_sorted[:,len(adv_distance_params["norm"]) * 3 + id * len(adv_distance_params["clever_batches"]) + j],
+
+                # Only plot CLEVER if it actually exists
+                if self.adv_distance_params["clever"]:
+                    clever_col_idx = len(self.adv_distance_params["norm"]) * 3 + id * len(self.adv_distance_params["clever_batches"]) + j
+                    plt.scatter(range(len(dist_sorted[:, clever_col_idx])),
+                                dist_sorted[:, clever_col_idx],
                                 s=5, label=f"Clever Score: {samples} samples")
+
                 plt.title(f"{n}-norm adversarial distance vs. CLEVER score")
                 plt.xlabel("Image ID sorted by adversarial distance")
                 plt.ylabel("Distance")
@@ -687,14 +700,21 @@ class TestTracking:
                 plt.close()
 
                 adv_fig.savefig(os.path.abspath(f'results/{self.dataset}/{self.modeltype}/config{self.experiment}_run'
-                                f'_{self.run}_adversarial_distances_{n}-norm_{samples}-CLEVER-samples.svg'))
-                adv_distance_frame.iloc[:, col_counter] = dist_sorted[:,len(adv_distance_params["norm"])*3+id*
-                                                                     len(adv_distance_params["clever_batches"]) + j]
+                                            f'_{self.run}_adversarial_distances_{n}-norm_{samples}-CLEVER-samples.svg'))
+                
+                # --- DataFrame Assignment Logic ---
+                if self.adv_distance_params["clever"]:
+                    # Calculate the correct index in dist_sorted
+                    clever_col_idx = len(self.adv_distance_params["norm"]) * 3 + id * len(self.adv_distance_params["clever_batches"]) + j
+                    adv_distance_frame.iloc[:, col_counter] = dist_sorted[:, clever_col_idx]
+                else:
+                    # If CLEVER is off, fill with 0.0 or NaN
+                    adv_distance_frame.iloc[:, col_counter] = 0.0
+
                 col_counter += 1
 
         adv_distance_frame.to_csv(self.adv_report_path,
-                                  index=False, header=True, sep=';', float_format='%1.4f', decimal=',')
-
+                                index=False, header=True, sep=';', float_format='%1.4f', decimal=',')
 
 # Custom Progress Callback - Recommended for your setup
 class PBTProgressCallback(Callback):

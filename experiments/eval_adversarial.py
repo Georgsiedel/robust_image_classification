@@ -157,14 +157,26 @@ def adv_distance(testloader, model, evalmodel, iterations_pgd, iterations_second
                 adv_inputs2, label_flipped2 = second_attack(evalmodel, inputs, labels, predicted, iterations_second_attack, n)
                 helper_array[:,1] = [label_flipped2, adv_inputs2.cpu().numpy(), torch.norm((inputs - adv_inputs2), p=n).cpu().numpy()]
 
-                selected_indices = np.where(helper_array[0])[0]
-                flipped = helper_array[:, selected_indices]
-                min_dist = flipped[2][np.argmin(flipped[2])]
-                min_adv_example = flipped[1][np.argmin(flipped[2])]
+                if np.any(helper_array[0]):
+                    # At least one success: pick the best (minimum distance) successful attack
+                    selected_indices = np.where(helper_array[0])[0]
+                    flipped = helper_array[:, selected_indices]
+                    
+                    # Safely get the minimum of the successful ones
+                    best_idx = np.argmin(flipped[2])
+                    min_dist = flipped[2][best_idx]
+                    min_adv_example = flipped[1][best_idx]
+                else:
+                    # No attack succeeded: just take the one that got "closest" (smallest norm)
+                    # even though the label didn't change.
+                    best_idx = np.argmin(helper_array[2])
+                    min_dist = helper_array[2][best_idx]
+                    min_adv_example = helper_array[1][best_idx]
 
                 if not np.any(helper_array[0]):
-                    min_dist = np.min(helper_array[2])
-                    min_adv_example = np.min(helper_array[1])
+                    best_idx = np.argmin(helper_array[2]) 
+                    min_dist = helper_array[2][best_idx]
+                    min_adv_example = helper_array[1][best_idx]
 
                 distances_array[i, id*3] = min_dist
                 distances_array[i, id*3+1:id*3+3] = helper_array[2,0:2]
@@ -195,7 +207,7 @@ def clever_score(testloader, evalmodel, clever_batches, clever_samples, epsilon,
 
     for id, (n, eps) in enumerate(zip(norm, epsilon)):
         for j, (batches, samples) in enumerate(zip(clever_batches, clever_samples)):
-            print(f'Clever calculation for {n}-norm with {samples} samples')
+            print(f'Clever calculation for {n}-norm with {samples} samples and {batches} batches')
             # Iterate through each image for CLEVER score calculation
             for batch_idx, (inputs, targets) in enumerate(testloader):
                 for r, input in enumerate(inputs):
@@ -216,18 +228,25 @@ def clever_score(testloader, evalmodel, clever_batches, clever_samples, epsilon,
             mean_clever_array[id*len(clever_batches)+j] = np.mean(clever_scores[:, id*len(clever_batches)+j])
     return clever_scores, mean_clever_array
 
-def compute_adv_distance(testset, workers, model, adv_distance_params):
+def compute_adv_distance(testset, workers, model, adv_distance_params, num_classes):
 
     print(f"Adversarial Distance upper bound calculation using lowest of PGD and a norm-specific second attack")
-    num_classes = len(testset.classes)
     truncated_testset, _ = torch.utils.data.random_split(testset,
                                                          [adv_distance_params["setsize"], len(testset)-adv_distance_params["setsize"]],
                                                          generator=torch.Generator().manual_seed(42))
     truncated_testloader = DataLoader(truncated_testset, batch_size=1, shuffle=False,
                                        pin_memory=True, num_workers=workers)
+    class Float32ModelWrapper(torch.nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
 
+        def forward(self, x):
+            # Force input to float32 before passing to the real model
+            return self.model(x.float())
+        
     images, _ = next(iter(truncated_testloader))
-    evalmodel = PyTorchClassifier(model=model,
+    evalmodel = PyTorchClassifier(model=Float32ModelWrapper(model),
                             loss=torch.nn.CrossEntropyLoss(),
                             optimizer=torch.optim.SGD(model.parameters(), momentum= 0.9, weight_decay= 1e-4, lr=0.01),
                             input_shape=images[0].size(),
@@ -253,7 +272,7 @@ def compute_adv_distance(testset, workers, model, adv_distance_params):
                             epsilon=eps, norm=adv_distance_params["norm"], setsize=adv_distance_params["setsize"])
     else:
         mean_clever_array = np.zeros([len(adv_distance_params["clever_batches"]) * len(adv_distance_params["norm"])])
-        clever_array = np.array([0.0])
+        clever_array = np.empty((distances_array.shape[0], 0))
     for id, n in enumerate(adv_distance_params["norm"]):
         sorted_indices = np.argsort(distances_array[:, id * 3])
         distances_array[:,id * 3:(id+1)*3] = distances_array[:,id * 3:(id+1)*3][sorted_indices[:, np.newaxis], np.arange(distances_array[:,id * 3:(id+1)*3].shape[1])]

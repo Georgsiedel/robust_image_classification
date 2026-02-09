@@ -157,7 +157,7 @@ if __name__ == '__main__':
                 
                 testsets_c = Dataloader.load_data_c(subset=subset, subsetsize=subsetsize, valid_run=False,
                                                     load_root="../data")
-                if args.experiment in []:
+                if args.experiment in [376]:
                     root="../data"
                 else:
                     root=None
@@ -166,11 +166,18 @@ if __name__ == '__main__':
                                                                 save_root=root)[0]
                 Testtracker.track_results(accs_c, i)
 
+                if args.dataset in ['ImageNet','ImageNet-100']:
+                    testset_a = Dataloader.load_data_a()
+                    testloader_a = torch.utils.data.DataLoader(testset_a, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
+                    acc_a, _ = compute_clean(testloader_a, model, Dataloader.num_classes, Dataloader.multilabel)
+                    Testtracker.track_results([acc_a], i)
+                    print(f'Accuracy on {args.dataset}-A: {acc_a}%')
+
             if args.calculate_adv_distance == True:  # adversarial distance calculation
                 adv_acc, dist_sorted, mean_dist = eval_adversarial.compute_adv_distance(Dataloader.testset,
-                                                                0, model, args.adv_distance_params)
+                                                                0, model, Testtracker.adv_distance_params, num_classes=Dataloader.num_classes)
                 Testtracker.track_results(np.concatenate(([adv_acc], mean_dist)), i)
-                Testtracker.save_adv_distance(dist_sorted, args.adv_distance_params)
+                Testtracker.save_adv_distance(dist_sorted)
 
             if args.calculate_autoattack_robustness == True:  # adversarial accuracy calculation
                 adv_acc_aa = eval_adversarial.compute_adv_acc(args.autoattack_params, Dataloader.testset,
