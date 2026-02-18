@@ -93,6 +93,7 @@ class CtModel(nn.Module):
     ):
         if style_norm_type := kwargs.get("norm_type", None):
             int_adain_probability = kwargs.get("style_probability", 0.0)
+            moex_lambda = kwargs.get("moex_lambda", 0.9)
 
         # define where mixup is applied. k=0 is in the input space, k>0 is in the embedding space (manifold mixup)
         if self.training == False:
@@ -130,9 +131,9 @@ class CtModel(nn.Module):
         prob = torch.rand(1).item()
 
         for i, ResidualBlock in enumerate(self.blocks[1:]):
-            if style_norm_type == "pono":
+            if style_norm_type == "pono_moex":
                 if prob < int_adain_probability and i == 0:
-                    out = self.pono(out, style_feats)
+                    out = self.moex(out, targets, lam=moex_lambda)
 
             out = ResidualBlock(out)
 
@@ -200,3 +201,47 @@ class CtModel(nn.Module):
         std = (x.var(dim=1, keepdim=True) + epsilon).sqrt()
         normalized = (x - mean) / std
         return normalized, mean, std
+
+    def moex(x, y, lam=0.9, epsilon=1e-5):
+        """
+        Moment Exchange (MoEx)
+
+        Args:
+            x: input tensor of shape (B, C, ...)
+            y: labels tensor (B, num_classes) or already soft labels
+            lam: mixing factor for labels
+            epsilon: numerical stability for PONO
+
+        Returns:
+            x_moex: tensor after moment exchange
+            y_moex: mixed labels
+        """
+        B = x.size(0)
+
+        if B % 2 != 0:
+            raise ValueError("Batch size must be even for simple half-split MoEx.")
+
+        # --- split batch ---
+        half = B // 2
+        x1, x2 = x[:half], x[half:]
+        y1, y2 = y[:half], y[half:]
+
+        # --- normalize each half ---
+        n1, m1, s1 = pono(x1, epsilon)
+        n2, m2, s2 = pono(x2, epsilon)
+
+        # --- exchange moments ---
+        # x1 gets moments from x2, and vice versa
+        x1_moex = n1 * s2 + m2
+        x2_moex = n2 * s1 + m1
+
+        x_moex = torch.cat([x1_moex, x2_moex], dim=0)
+
+        # --- exchange / mix labels ---
+        y1_moex = lam * y1 + (1 - lam) * y2
+        y2_moex = lam * y2 + (1 - lam) * y1
+
+        y_moex = torch.cat([y1_moex, y2_moex], dim=0)
+
+        return x_moex, y_moex
+

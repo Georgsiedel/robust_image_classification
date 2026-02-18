@@ -150,7 +150,7 @@ def ResNet50(num_classes, dataset, normalized, factor, activation_function='relu
 def PreActResNet50(num_classes, dataset, normalized, factor, activation_function='relu'):
         if dataset in ['ImageNet', 'ImageNet-100', 'TreeSAT', 'Casting-Product-Quality', 'SynthiCAD', 
                        'Describable-Textures', 'Flickr-Material', 'KITTI_RoadLane', 'KITTI_Distance_Multiclass']:
-            return in_resnet.resnet50(weights=in_resnet.ResNet50_Weights.IMAGENET1K_V2, dataset=dataset, normalized=normalized, activation_function=activation_function, num_classes=num_classes)
+            return in_resnet.resnet50(weights=in_resnet.ResNet50_Weights.IMAGENET1K_V1, dataset=dataset, normalized=normalized, activation_function=activation_function, num_classes=num_classes)
         else:
             print('not yet implemented')
 

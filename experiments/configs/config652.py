@@ -24,16 +24,16 @@ validontest = True
 validonc = True
 validonadv = False
 lrschedule = 'CosineAnnealingLR'
-learningrate = 0.1
-epochs = 195
-lrparams = {'T_max': 195}
-warmupepochs = 5
+learningrate = 0.01
+epochs = 100
+lrparams = {'T_max': 100}
+warmupepochs = 0
 earlystop = False
 earlystopPatience = 15
 optimizer = 'SGD'
 optimizerparams = {'momentum': 0.9, 'weight_decay': 1e-4, 'nesterov': False}
 number_workers = 8
-modeltype = 'ResNet50'
+modeltype = 'PreActResNet50'
 modelparams = {}
 resize = False
 aggressive_soft_crop = False
@@ -54,7 +54,7 @@ cutmix = {'alpha': 1.0, 'p': 0.0} # default alpha 1.0 #If both mixup and cutmix 
 manifold = {'apply': False, 'noise_factor': 3}
 n2n_deepaugment = True
 RandomEraseProbability = 0.0
-swa = {'apply': True, 'start_factor': 0.8, 'lr_factor': 0.2}
+swa = {'apply': False, 'start_factor': 0.8, 'lr_factor': 0.2}
 
 #define train and test corruptions:
 #define noise type (first column): 'gaussian', 'uniform-l0-impulse', 'uniform-l0-salt-pepper', 'uniform-linf'. also: all positive numbers p>0 for uniform Lp possible: 'uniform-l1', 'uniform-l2', ...

@@ -99,7 +99,7 @@ def compute_clean(testloader, model, num_classes, multilabel = False):
 
         acc = 100.*correct/total
         rmsce_clean = float(calibration_metric.compute().cpu())
-        print("Clean Accuracy ", acc, "%, RMSCE Calibration Error: ", rmsce_clean)
+        print("Accuracy ", acc, "%, RMSCE Calibration Error: ", rmsce_clean)
 
         return acc, rmsce_clean
 
@@ -167,11 +167,38 @@ if __name__ == '__main__':
                 Testtracker.track_results(accs_c, i)
 
                 if args.dataset in ['ImageNet','ImageNet-100']:
-                    testset_a = Dataloader.load_data_a()
-                    testloader_a = torch.utils.data.DataLoader(testset_a, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
-                    acc_a, _ = compute_clean(testloader_a, model, Dataloader.num_classes, Dataloader.multilabel)
+                    further_testset = Dataloader.load_data_a()
+                    further_testloader = torch.utils.data.DataLoader(further_testset, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
+                    acc_a, _ = compute_clean(further_testloader, model, Dataloader.num_classes, Dataloader.multilabel)
                     Testtracker.track_results([acc_a], i)
                     print(f'Accuracy on {args.dataset}-A: {acc_a}%')
+
+                    further_testset = Dataloader.load_data_r()
+                    further_testloader = torch.utils.data.DataLoader(further_testset, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
+                    acc_r, _ = compute_clean(further_testloader, model, Dataloader.num_classes, Dataloader.multilabel)
+                    Testtracker.track_results([acc_r], i)
+                    print(f'Accuracy on {args.dataset}-R: {acc_r}%')
+
+                    further_testset = Dataloader.load_data_sketch()
+                    further_testloader = torch.utils.data.DataLoader(further_testset, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
+                    acc_sketch, _ = compute_clean(further_testloader, model, Dataloader.num_classes, Dataloader.multilabel)
+                    Testtracker.track_results([acc_sketch], i)
+                    print(f'Accuracy on {args.dataset}-Sketch: {acc_sketch}%')
+
+                    further_testset, further_testset_2 = Dataloader.load_data_es()
+                    further_testloader = torch.utils.data.DataLoader(further_testset, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
+                    further_testloader_2 = torch.utils.data.DataLoader(further_testset_2, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
+                    acc_es_auto, _ = compute_clean(further_testloader, model, Dataloader.num_classes, Dataloader.multilabel)
+                    print(f'Accuracy on {args.dataset}-ES-auto_exposure: {acc_es_auto}%')
+                    acc_es_param, _ = compute_clean(further_testloader_2, model, Dataloader.num_classes, Dataloader.multilabel)
+                    print(f'Accuracy on {args.dataset}-ES-param_control: {acc_es_param}%')
+                    Testtracker.track_results([acc_es_auto, acc_es_param], i)
+
+                    further_testset = Dataloader.load_data_v2()
+                    further_testloader = torch.utils.data.DataLoader(further_testset, batch_size=args.batchsize, pin_memory=True, num_workers=workers)
+                    acc_v2, _ = compute_clean(further_testloader, model, Dataloader.num_classes, Dataloader.multilabel)
+                    Testtracker.track_results([acc_v2], i)
+                    print(f'Accuracy on {args.dataset}-V2: {acc_v2}%')
 
             if args.calculate_adv_distance == True:  # adversarial distance calculation
                 adv_acc, dist_sorted, mean_dist = eval_adversarial.compute_adv_distance(Dataloader.testset,

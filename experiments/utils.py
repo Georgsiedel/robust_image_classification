@@ -11,6 +11,8 @@ import datetime
 import json
 from ray.tune.callback import Callback
 import time
+import warnings
+from typing import Dict, Any, Tuple
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -203,12 +205,109 @@ class CsvHandler:
         except KeyError:
             return None
 
+def _strip_module_prefix(sd: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of state_dict without a leading 'module.' prefix if present."""
+    if not any(k.startswith("module.") for k in sd.keys()):
+        return sd
+    new = {}
+    for k, v in sd.items():
+        if k.startswith("module."):
+            new[k[len("module."):]] = v
+        else:
+            new[k] = v
+    return new
+
+
+def _filter_deepaugment(sd: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove keys containing deepaugment_instance to avoid loading them."""
+    return {k: v for k, v in sd.items() if "deepaugment_instance" not in k}
+
+
+def _safe_model_load(model: torch.nn.Module, state_dict: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Try to load state_dict into model robustly.
+    Returns (success, message). Prefers strict=True; if that fails, tries
+    without "module." prefix and strict=False as a fallback.
+    """
+    if state_dict is None:
+        return False, "no state_dict provided"
+
+    # Try direct strict load first with given dict
+    try:
+        model.load_state_dict(state_dict, strict=True)
+        return True, "loaded strict=True"
+    except Exception as e:
+        # try stripping module prefix
+        try:
+            stripped = _strip_module_prefix(state_dict)
+            model.load_state_dict(stripped, strict=True)
+            return True, "loaded strict=True after stripping 'module.'"
+        except Exception:
+            pass
+
+    # try strict=False variants
+    try:
+        model.load_state_dict(state_dict, strict=False)
+        return True, "loaded strict=False (direct)"
+    except Exception:
+        pass
+
+    try:
+        stripped = _strip_module_prefix(state_dict)
+        model.load_state_dict(stripped, strict=False)
+        return True, "loaded strict=False after stripping 'module.'"
+    except Exception as e:
+        return False, f"failed to load model state_dict: {e}"
+
+
+def _safe_optimizer_load(optimizer: torch.optim.Optimizer, state_dict: Dict[str, Any]) -> bool:
+    """
+    Best-effort load optimizer state. Returns True if loaded, False otherwise.
+    If param_groups mismatch, fails safely and returns False.
+    """
+    if state_dict is None:
+        return False
+    try:
+        optimizer.load_state_dict(state_dict)
+        return True
+    except Exception as e:
+        warnings.warn(f"optimizer.load_state_dict failed: {e}; attempting best-effort adaptation.")
+    # try adaptation: match number of param_groups
+    try:
+        cur_sd = optimizer.state_dict()
+        if 'param_groups' in state_dict and 'param_groups' in cur_sd:
+            if len(state_dict['param_groups']) == len(cur_sd['param_groups']):
+                # Try to assign - this may or may not work depending on param ids, but try.
+                try:
+                    optimizer.load_state_dict(state_dict)
+                    return True
+                except Exception as e:
+                    warnings.warn(f"Adapted optimizer load failed: {e}")
+                    return False
+            else:
+                warnings.warn("optimizer param_groups length mismatch; skipping optimizer state load.")
+                return False
+    except Exception:
+        pass
+    return False
+
+
+def _safe_scheduler_load(scheduler: Any, state_dict: Dict[str, Any]) -> bool:
+    if scheduler is None or state_dict is None:
+        return False
+    try:
+        # Some schedulers expose load_state_dict
+        scheduler.load_state_dict(state_dict)
+        return True
+    except Exception as e:
+        warnings.warn(f"scheduler.load_state_dict failed: {e}")
+        return False
 
 class Checkpoint:
     """Early stops the training if validation loss doesn't improve after a given patience.
     credit to https://github.com/Bjarten/early-stopping-pytorch/tree/master for early stopping functionality"""
 
-    def __init__(self, dataset, modeltype, experiment, train_corruption, run, 
+    def __init__(self, dataset, modeltype, experiment, train_corruption, run,
                  earlystopping=False, patience=7, verbose=False, delta=0, trace_func=print,
                  checkpoint_dir=f'../trained_models', pbt=0
                  ):
@@ -235,12 +334,12 @@ class Checkpoint:
         self.early_stopping = earlystopping
         self.checkpoint_dir = checkpoint_dir
         if pbt == 0:
-            first_placeholder = '' 
+            first_placeholder = ''
             second_placeholder = ''
         elif pbt == 1:
             first_placeholder = 'pbt_'
             second_placeholder = '_tune'
-        elif pbt == 2: 
+        elif pbt == 2:
             first_placeholder = 'pbt_'
             second_placeholder = '_replay'
         else:
@@ -270,89 +369,210 @@ class Checkpoint:
             self.counter = 0
             self.best_model = True
 
-    def load_model(self, model, swa_model, optimizer, scheduler, swa_scheduler, type='standard', pbt=False):
-        checkpoint = torch.load(self.checkpoint_path, weights_only=False)
+    def load_model(self, model, swa_model, optimizer, scheduler, type='standard', pbt=False):
+        """
+        Loads checkpoint in a backwards-compatible and tolerant way.
+
+        Returns:
+            start_epoch, model, swa_model, optimizer, scheduler, swa_scheduler, history_blob
+        where history_blob is either None or a dict: {'columns': [...], 'values': ndarray}
+        The caller (Train_tracking) should adapt the history_blob into its own columns by calling
+        Train_tracking.from_checkpoint(history_blob, resume_epoch=start_epoch).
+        """
+        if not os.path.exists(self.checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint file not found: {self.checkpoint_path}")
+
+        checkpoint = torch.load(
+            self.checkpoint_path,
+            map_location='cpu',
+            weights_only=False  # explicitly restore old behavior
+        )
+
+        # pick keys based on type
         if type == 'standard':
-            filtered_state_dict = {k: v for k, v in checkpoint["model_state_dict"].items() if "deepaugment_instance" not in k}
-            model.load_state_dict(filtered_state_dict, strict=True)
-            start_epoch = checkpoint['epoch'] + 1
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            model_key = "model_state_dict"
+            optim_key = "optimizer_state_dict"
+            sched_key = "scheduler_state_dict"
+            swa_model_key = "swa_model_state_dict"
+            epoch_key = "epoch"
         elif type == 'best':
-            filtered_state_dict = {k: v for k, v in checkpoint["best_model_state_dict"].items() if "deepaugment_instance" not in k}
-            model.load_state_dict(filtered_state_dict, strict=True)
-            start_epoch = checkpoint['best_epoch'] + 1
-            optimizer.load_state_dict(checkpoint['best_optimizer_state_dict'])
-            scheduler.load_state_dict(checkpoint['best_scheduler_state_dict'])
+            model_key = "best_model_state_dict"
+            optim_key = "best_optimizer_state_dict"
+            sched_key = "best_scheduler_state_dict"
+            swa_model_key = "best_swa_model_state_dict"
+            epoch_key = "best_epoch"
         else:
-            print('only best_checkpoint or checkpoint can be loaded')
+            raise ValueError("type must be 'standard' or 'best'")
 
-        if pbt == True:
-            history = checkpoint.get('history', [])
+        # ---- MODEL ----
+        model_state = checkpoint.get(model_key, None)
+        if model_state is not None:
+            # filter out unwanted keys and try to load robustly
+            filtered = _filter_deepaugment(model_state)
+            ok, msg = _safe_model_load(model, filtered)
+            if not ok:
+                # in case of failure, try another fallback: load with strict=False anyway
+                try:
+                    model.load_state_dict(_strip_module_prefix(filtered), strict=False)
+                    warnings.warn("Loaded model via fallback strict=False.")
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load model from checkpoint: {e}")
         else:
-            history = []
+            warnings.warn(f"Checkpoint missing {model_key}; model not loaded.")
 
-        if swa_model != None:
-            if type == 'standard':
-                swa_filtered_state_dict = {k: v for k, v in checkpoint["swa_model_state_dict"].items() if "deepaugment_instance" not in k}
-                swa_model.load_state_dict(swa_filtered_state_dict, strict=True)
-                swa_scheduler.load_state_dict(checkpoint['swa_scheduler_state_dict'])
-            elif type == 'best':
-                swa_filtered_state_dict = {k: v for k, v in checkpoint["best_swa_model_state_dict"].items() if "deepaugment_instance" not in k}
-                swa_model.load_state_dict(swa_filtered_state_dict, strict=True)
-                swa_scheduler.load_state_dict(checkpoint['best_swa_scheduler_state_dict'])
+        # ---- EPOCH ----
+        start_epoch = int(checkpoint.get(epoch_key, -1)) + 1
 
-        return start_epoch, model, swa_model, optimizer, scheduler, swa_scheduler, history
+        # ---- OPTIMIZER ----
+        optim_state = checkpoint.get(optim_key, None)
+        if optimizer is not None and optim_state is not None:
+            loaded = _safe_optimizer_load(optimizer, optim_state)
+            if not loaded:
+                warnings.warn("Optimizer state could not be loaded; continuing with fresh optimizer.")
+        elif optimizer is not None and optim_state is None:
+            warnings.warn("No optimizer state found in checkpoint for this key; continuing with fresh optimizer.")
 
-    def save_checkpoint(self, model, swa_model, optimizer, scheduler, swa_scheduler, epoch, 
+        # ---- SCHEDULER ----
+        sched_state = checkpoint.get(sched_key, None)
+        if scheduler is not None and sched_state is not None:
+            _safe_scheduler_load(scheduler, sched_state)
+        elif scheduler is not None and sched_state is None:
+            warnings.warn("No scheduler state found in checkpoint for this key; continuing with fresh scheduler.")
+
+        # ---- SWA model & scheduler (optional) ----
+        if swa_model is not None:
+            swa_state = checkpoint.get(swa_model_key, None)
+            if swa_state is not None:
+                # filter and load best-effort
+                swa_filtered = _filter_deepaugment(swa_state)
+                ok, _ = _safe_model_load(swa_model, swa_filtered)
+                if not ok:
+                    warnings.warn("SWA model partially/failed to load (some keys missing).")
+            else:
+                # if checkpoint lacks swa key, that's okay; just continue without SWA loaded
+                warnings.warn(f"No SWA model state '{swa_model_key}' found in checkpoint; skipping swa load.")
+
+        # ---- HISTORY ----
+        if pbt:
+            raw_history = checkpoint.get('history', None)
+        else:
+            raw_history = None
+
+        # Normalize history into canonical dict form if present, and trim/pad to start_epoch
+        history_blob = None
+        if raw_history is not None:
+            try:
+                # if it's already a dict with columns and values, use it
+                if isinstance(raw_history, dict) and 'columns' in raw_history and 'values' in raw_history:
+                    cols = list(raw_history['columns'])
+                    vals = np.asarray(raw_history['values'], dtype=float)
+                    # ensure 2D
+                    if vals.ndim == 1:
+                        vals = vals.reshape(-1, 1)
+                else:
+                    # try to coerce legacy list/ndarray into 2D array
+                    vals = np.asarray(raw_history, dtype=float)
+                    if vals.ndim == 1:
+                        vals = vals.reshape(-1, 1)
+                    cols = [f"col{i}" for i in range(vals.shape[1])]
+                # trim/pad rows to start_epoch
+                if vals.shape[0] > start_epoch:
+                    vals = vals[:start_epoch, :]
+                elif vals.shape[0] < start_epoch:
+                    pad = np.full((start_epoch - vals.shape[0], vals.shape[1]), np.nan, dtype=float)
+                    vals = np.vstack([vals, pad])
+                history_blob = {'columns': cols, 'values': vals}
+            except Exception as e:
+                warnings.warn(f"Failed to normalize checkpoint history: {e}")
+                history_blob = None
+        else:
+            history_blob = None
+
+        return start_epoch, model, swa_model, optimizer, scheduler, history_blob
+
+    def save_checkpoint(self, model, swa_model, optimizer, scheduler, swa_scheduler, epoch,
                         history=None):
+        """
+        Save checkpoint. Backwards-compatible:
+         - If self.best_model True, write 'best_' keys.
+         - If checkpoint file doesn't exist when writing non-best, create a fresh one.
+         - Accept history as Train_tracking instance, dict, list, or ndarray.
+        """
+        # prepare swa_state dicts
+        swa_state = None if swa_model is None else (swa_model.state_dict() if hasattr(swa_model, "state_dict") else None)
+        swa_sched_state = None if swa_scheduler is None else (swa_scheduler.state_dict() if hasattr(swa_scheduler, "state_dict") else None)
 
-        #filtered_state_dict = {k: v for k, v in model.state_dict().items() if "deepaugment_instance" not in k}
-
-        swa_model = None if swa_model == None else swa_model.state_dict()
-        swa_scheduler = None if swa_scheduler == None else swa_scheduler.state_dict()
-
-        if self.best_model == True:
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(), #filtered_state_dict
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'swa_model_state_dict': swa_model,
-                'swa_scheduler_state_dict': swa_scheduler,
-                'best_epoch': epoch,
+        if self.best_model:
+            # write a full snapshot (create file / overwrite)
+            payload = {
+                'epoch': int(epoch),
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict() if optimizer is not None else None,
+                'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None,
+                'swa_model_state_dict': swa_state,
+                'swa_scheduler_state_dict': swa_sched_state,
+                'best_epoch': int(epoch),
                 'best_model_state_dict': model.state_dict(),
-                'best_optimizer_state_dict': optimizer.state_dict(),
-                'best_scheduler_state_dict': scheduler.state_dict(),
-                'best_swa_model_state_dict': swa_model,
-                'best_swa_scheduler_state_dict': swa_scheduler,
-            }, self.checkpoint_path)
-
+                'best_optimizer_state_dict': optimizer.state_dict() if optimizer is not None else None,
+                'best_scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None,
+                'best_swa_model_state_dict': swa_state,
+                'best_swa_scheduler_state_dict': swa_sched_state,
+            }
+            # include history if present
+            if history is not None:
+                if isinstance(history, TrainTracking):
+                    payload['history'] = history.to_dict()
+                else:
+                    payload['history'] = history
+            torch.save(payload, self.checkpoint_path)
         else:
-            checkpoint = torch.load(self.checkpoint_path, weights_only=False)
-            checkpoint['epoch'] = epoch
+            # update existing checkpoint or create new one if missing
+            if os.path.exists(self.checkpoint_path):
+                try:
+                    checkpoint = torch.load(
+                        self.checkpoint_path,
+                        map_location='cpu',
+                        weights_only=False  # explicitly restore old behavior
+                    )
+                except Exception:
+                    checkpoint = {}
+            else:
+                checkpoint = {}
+
+            checkpoint['epoch'] = int(epoch)
             checkpoint['model_state_dict'] = model.state_dict()
-            checkpoint['optimizer_state_dict'] = optimizer.state_dict()
-            checkpoint['scheduler_state_dict'] = scheduler.state_dict()
-            checkpoint['swa_model_state_dict'] = swa_model
-            checkpoint['swa_scheduler_state_dict'] = swa_scheduler
+            if optimizer is not None:
+                checkpoint['optimizer_state_dict'] = optimizer.state_dict()
+            if scheduler is not None:
+                try:
+                    checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+                except Exception:
+                    warnings.warn("Could not save scheduler.state_dict()")
+            checkpoint['swa_model_state_dict'] = swa_state
+            checkpoint['swa_scheduler_state_dict'] = swa_sched_state
 
             if history is not None:
-                checkpoint['history'] = history
+                if isinstance(history, TrainTracking):
+                    checkpoint['history'] = history.to_dict()
+                else:
+                    checkpoint['history'] = history
 
             torch.save(checkpoint, self.checkpoint_path)
 
     def save_final_model(self, model, optimizer, scheduler, epoch):
         print('Final model saved to', self.final_model_path)
         torch.save({
-            'epoch': epoch,
+            'epoch': int(epoch),
             'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'scheduler_state_dict': scheduler.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict() if optimizer is not None else None,
+            'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None,
         }, self.final_model_path)
 
+
 class TrainTracking:
-    def __init__(self, dataset, modeltype, lrschedule, experiment, run, validonc, validonadv, swa, pbt=False):
+    def __init__(self, dataset, modeltype, lrschedule, experiment, run,
+                 validonc, validonadv, swa, pbt=False):
+
         self.dataset = dataset
         self.modeltype = modeltype
         self.lrschedule = lrschedule
@@ -361,132 +581,217 @@ class TrainTracking:
         self.validonc = validonc
         self.validonadv = validonadv
         self.swa = swa
-        self.train_accs, self.train_losses, self.valid_accs, self.valid_losses, self.valid_accs_robust = [],[],[],[],[]
-        self.valid_accs_adv, self.valid_accs_swa, self.valid_accs_robust_swa, self.valid_accs_adv_swa = [],[],[],[]
+
+        self.train_accs, self.train_losses = [], []
+        self.valid_accs, self.valid_losses = [], []
+        self.valid_accs_robust = []
+        self.valid_accs_adv = []
+        self.valid_accs_swa = []
+        self.valid_accs_robust_swa = []
+        self.valid_accs_adv_swa = []
         self.elapsed_time = []
+
         PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        pbt_placeholder = 'pbt_' if pbt == True else '' #just to have different filenames for pbt and non-pbt runs
-        self.csv_path = os.path.abspath(os.path.join(PROJECT_ROOT, f'results/{self.dataset}/{self.modeltype}/{pbt_placeholder}config{self.experiment}_'
-                                           f'learning_curve_run_{self.run}.csv'))
-        self.learningcurve_path = os.path.abspath(os.path.join(PROJECT_ROOT, f'results/{self.dataset}/{self.modeltype}/{pbt_placeholder}config{self.experiment}_'
-                                                  f'learning_curve_run_{self.run}.svg'))
-        self.config_src_path = os.path.abspath(os.path.join(PROJECT_ROOT, f'experiments/configs/{pbt_placeholder}config{self.experiment}.py'))
-        self.config_dst_path = os.path.abspath(os.path.join(PROJECT_ROOT, f'results/{self.dataset}/{self.modeltype}/{pbt_placeholder}config{self.experiment}.py'))
+        pbt_placeholder = 'pbt_' if pbt == True else ''
+
+        self.csv_path = os.path.abspath(os.path.join(
+            PROJECT_ROOT,
+            f'results/{self.dataset}/{self.modeltype}/'
+            f'{pbt_placeholder}config{self.experiment}_learning_curve_run_{self.run}.csv'))
+
+        self.learningcurve_path = os.path.abspath(os.path.join(
+            PROJECT_ROOT,
+            f'results/{self.dataset}/{self.modeltype}/'
+            f'{pbt_placeholder}config{self.experiment}_learning_curve_run_{self.run}.svg'))
+
+        self.config_src_path = os.path.abspath(os.path.join(
+            PROJECT_ROOT,
+            f'experiments/configs/{pbt_placeholder}config{self.experiment}.py'))
+
+        self.config_dst_path = os.path.abspath(os.path.join(
+            PROJECT_ROOT,
+            f'results/{self.dataset}/{self.modeltype}/'
+            f'{pbt_placeholder}config{self.experiment}.py'))
+
         os.makedirs(os.path.dirname(self.csv_path), exist_ok=True)
 
-    def load_learning_curves(self):
+    # ------------------------------------------------------------
+    # LOADING (AUTO-MAPS COLUMNS + TRIMS TO CURRENT SETUP)
+    # ------------------------------------------------------------
 
-        learning_curve_frame = pd.read_csv(self.csv_path, sep=';', decimal=',')
-        elapsed_time = learning_curve_frame.iloc[:, 0].values.tolist()
-        train_accs = learning_curve_frame.iloc[:, 1].values.tolist()
-        train_losses = learning_curve_frame.iloc[:, 2].values.tolist()
-        valid_accs = learning_curve_frame.iloc[:, 3].values.tolist()
-        valid_losses = learning_curve_frame.iloc[:, 4].values.tolist()
-        columns=5
+    def load_learning_curves(self, resume_epoch=None):
 
-        valid_accs_robust, valid_accs_adv, valid_accs_swa, valid_accs_robust_swa, valid_accs_adv_swa = [],[],[],[],[]
-        if self.validonc == True:
-            valid_accs_robust = learning_curve_frame.iloc[:, columns].values.tolist()
-            columns = columns + 1
-        if self.validonadv == True:
-            valid_accs_adv = learning_curve_frame.iloc[:, columns].values.tolist()
-            columns = columns + 1
-        if self.swa['apply'] == True:
-            valid_accs_swa = learning_curve_frame.iloc[:, columns].values.tolist()
-            if self.validonc == True:
-                valid_accs_robust_swa = learning_curve_frame.iloc[:, columns+1].values.tolist()
-                columns = columns + 1
-            if self.validonadv == True:
-                valid_accs_adv_swa = learning_curve_frame.iloc[:, columns+1].values.tolist()
+        if not os.path.exists(self.csv_path):
+            return
 
-        self.elapsed_time = elapsed_time
-        self.train_accs = train_accs
-        self.train_losses = train_losses
-        self.valid_accs = valid_accs
-        self.valid_losses = valid_losses
-        self.valid_accs_robust = valid_accs_robust
-        self.valid_accs_adv = valid_accs_adv
-        self.valid_accs_swa = valid_accs_swa
-        self.valid_accs_robust_swa = valid_accs_robust_swa
-        self.valid_accs_adv_swa = valid_accs_adv_swa
+        df = pd.read_csv(self.csv_path, sep=';', decimal=',')
 
-    def save_metrics(self, elapsed_time, train_acc, valid_acc, valid_acc_robust, valid_acc_adv, valid_acc_swa,
-                             valid_acc_robust_swa, valid_acc_adv_swa, train_loss, valid_loss):
+        # Always load base columns if present
+        self.elapsed_time = df['time'].tolist() if 'time' in df else []
+        self.train_accs = df['train_accuracy'].tolist() if 'train_accuracy' in df else []
+        self.train_losses = df['train_loss'].tolist() if 'train_loss' in df else []
+        self.valid_accs = df['valid_accuracy'].tolist() if 'valid_accuracy' in df else []
+        self.valid_losses = df['valid_loss'].tolist() if 'valid_loss' in df else []
+
+        # Optional columns (only load if both exist AND current setup wants them)
+        if self.validonc and 'valid_accuracy_robust' in df:
+            self.valid_accs_robust = df['valid_accuracy_robust'].tolist()
+        else:
+            self.valid_accs_robust = [None] * len(self.valid_accs)
+
+        if self.validonadv and 'valid_accuracy_adversarial' in df:
+            self.valid_accs_adv = df['valid_accuracy_adversarial'].tolist()
+        else:
+            self.valid_accs_adv = [None] * len(self.valid_accs)
+
+        if self.swa['apply'] and 'valid_accuracy_swa' in df:
+            self.valid_accs_swa = df['valid_accuracy_swa'].tolist()
+        else:
+            self.valid_accs_swa = [None] * len(self.valid_accs)
+
+        if self.validonc and self.swa['apply'] and 'valid_accuracy_robust_swa' in df:
+            self.valid_accs_robust_swa = df['valid_accuracy_robust_swa'].tolist()
+        else:
+            self.valid_accs_robust_swa = [None] * len(self.valid_accs)
+
+        if self.validonadv and self.swa['apply'] and 'valid_accuracy_adversarial_swa' in df:
+            self.valid_accs_adv_swa = df['valid_accuracy_adversarial_swa'].tolist()
+        else:
+            self.valid_accs_adv_swa = [None] * len(self.valid_accs)
+
+        # ---- TRIM IF RESUMING FROM EARLIER EPOCH ----
+        if resume_epoch is not None:
+            self._trim_to_epoch(resume_epoch)
+
+    # ------------------------------------------------------------
+
+    def _trim_to_epoch(self, epoch):
+        """
+        Keep only entries up to resume epoch.
+        If best_epoch was 80, and resume_epoch=81, we keep first 80 rows.
+        """
+        max_len = epoch
+        self.elapsed_time = self.elapsed_time[:max_len]
+        self.train_accs = self.train_accs[:max_len]
+        self.train_losses = self.train_losses[:max_len]
+        self.valid_accs = self.valid_accs[:max_len]
+        self.valid_losses = self.valid_losses[:max_len]
+        self.valid_accs_robust = self.valid_accs_robust[:max_len]
+        self.valid_accs_adv = self.valid_accs_adv[:max_len]
+        self.valid_accs_swa = self.valid_accs_swa[:max_len]
+        self.valid_accs_robust_swa = self.valid_accs_robust_swa[:max_len]
+        self.valid_accs_adv_swa = self.valid_accs_adv_swa[:max_len]
+
+    # ------------------------------------------------------------
+    # SAVING METRICS (UNCHANGED SIGNATURE)
+    # ------------------------------------------------------------
+
+    def save_metrics(self, elapsed_time, train_acc, valid_acc,
+                     valid_acc_robust, valid_acc_adv,
+                     valid_acc_swa, valid_acc_robust_swa,
+                     valid_acc_adv_swa, train_loss, valid_loss):
 
         self.elapsed_time.append(elapsed_time)
         self.train_accs.append(train_acc)
         self.train_losses.append(train_loss)
         self.valid_accs.append(valid_acc)
         self.valid_losses.append(valid_loss)
-        self.valid_accs_robust.append(valid_acc_robust)
-        self.valid_accs_adv.append(valid_acc_adv)
-        self.valid_accs_swa.append(valid_acc_swa)
-        self.valid_accs_robust_swa.append(valid_acc_robust_swa)
-        self.valid_accs_adv_swa.append(valid_acc_adv_swa)
+
+        self.valid_accs_robust.append(valid_acc_robust if self.validonc else None)
+        self.valid_accs_adv.append(valid_acc_adv if self.validonadv else None)
+
+        if self.swa['apply']:
+            self.valid_accs_swa.append(valid_acc_swa)
+            self.valid_accs_robust_swa.append(valid_acc_robust_swa if self.validonc else None)
+            self.valid_accs_adv_swa.append(valid_acc_adv_swa if self.validonadv else None)
+        else:
+            self.valid_accs_swa.append(None)
+            self.valid_accs_robust_swa.append(None)
+            self.valid_accs_adv_swa.append(None)
+
+    # ------------------------------------------------------------
+    # SAVE CSV (AUTO BUILDS ONLY CURRENT COLUMNS)
+    # ------------------------------------------------------------
 
     def save_learning_curves(self):
 
-        learning_curve_frame = pd.DataFrame({'time': self.elapsed_time, "train_accuracy": self.train_accs, "train_loss": self.train_losses,
-                                                 "valid_accuracy": self.valid_accs, "valid_loss": self.valid_losses})
-        columns = 5
-        if self.validonc == True:
-            learning_curve_frame.insert(columns, "valid_accuracy_robust", self.valid_accs_robust)
-            columns = columns + 1
-        if self.validonadv == True:
-            learning_curve_frame.insert(columns, "valid_accuracy_adversarial", self.valid_accs_adv)
-            columns = columns + 1
-        if self.swa['apply'] == True:
-            learning_curve_frame.insert(columns, "valid_accuracy_swa", self.valid_accs_swa)
-            if self.validonc == True:
-                learning_curve_frame.insert(columns+1, "valid_accuracy_robust_swa", self.valid_accs_robust_swa)
-                columns = columns + 1
-            if self.validonadv == True:
-                learning_curve_frame.insert(columns+1, "valid_accuracy_adversarial_swa", self.valid_accs_adv_swa)
-        learning_curve_frame.to_csv(self.csv_path, index=False, header=True, sep=';', float_format='%1.4f', decimal=',')
+        df = pd.DataFrame({
+            'time': self.elapsed_time,
+            'train_accuracy': self.train_accs,
+            'train_loss': self.train_losses,
+            'valid_accuracy': self.valid_accs,
+            'valid_loss': self.valid_losses
+        })
 
+        if self.validonc:
+            df['valid_accuracy_robust'] = self.valid_accs_robust
+
+        if self.validonadv:
+            df['valid_accuracy_adversarial'] = self.valid_accs_adv
+
+        if self.swa['apply']:
+            df['valid_accuracy_swa'] = self.valid_accs_swa
+            if self.validonc:
+                df['valid_accuracy_robust_swa'] = self.valid_accs_robust_swa
+            if self.validonadv:
+                df['valid_accuracy_adversarial_swa'] = self.valid_accs_adv_swa
+
+        df.to_csv(self.csv_path, index=False, sep=';', float_format='%1.4f', decimal=',')
+
+        # ---- Plot (unchanged logic) ----
         x = list(range(1, len(self.train_accs) + 1))
         plt.figure()
         plt.plot(x, self.train_accs, label='Train Accuracy')
         plt.plot(x, self.valid_accs, label='Validation Accuracy')
-        if self.validonc == True:
+
+        if self.validonc:
             plt.plot(x, self.valid_accs_robust, label='Robust Validation Accuracy')
-        if self.validonadv == True:
+        if self.validonadv:
             plt.plot(x, self.valid_accs_adv, label='Adversarial Validation Accuracy')
-        if self.swa['apply'] == True:
-            swa_diff = [self.valid_accs_swa[i] if self.valid_accs[i] != self.valid_accs_swa[i] else None for i in
-                        range(len(self.valid_accs))]
-            plt.plot(x, swa_diff, label='SWA Validation Accuracy')
-            if self.validonc == True:
-                swa_robust_diff = [self.valid_accs_robust_swa[i] if self.valid_accs_robust[i] != self.valid_accs_robust_swa[i]
-                            else None for i in range(len(self.valid_accs_robust))]
-                plt.plot(x, swa_robust_diff, label='SWA Robust Validation Accuracy')
-            if self.validonadv == True:
-                swa_adv_diff = [self.valid_accs_adv_swa[i] if self.valid_accs_adv[i] != self.valid_accs_adv_swa[i]
-                            else None for i in range(len(self.valid_accs_adv))]
-                plt.plot(x, swa_adv_diff, label='SWA Adversarial Validation Accuracy')
+        if self.swa['apply']:
+            plt.plot(x, self.valid_accs_swa, label='SWA Validation Accuracy')
+
         plt.title('Learning Curves')
         plt.xlabel('Epochs')
         plt.ylabel('Accuracy')
-        plt.xticks(np.linspace(1, len(self.train_accs), num=10, dtype=int))
         plt.legend(loc='best')
         plt.savefig(self.learningcurve_path)
         plt.close()
 
+    # ------------------------------------------------------------
+
     def save_config(self):
         shutil.copyfile(self.config_src_path, self.config_dst_path)
 
+    # ------------------------------------------------------------
+
     def print_results(self):
-        if not self.elapsed_time: #if we train for 0 epochs (just loading pretrained model)
+        if not self.elapsed_time:
             return
-        print('Total training time: ', str(datetime.timedelta(seconds=max(self.elapsed_time))))
-        print("Maximum (non-SWA) validation accuracy of", max(self.valid_accs), "achieved after",
-              np.argmax(self.valid_accs) + 1, "epochs; ")
-        if self.validonc:
-            print("Maximum (non-SWA) robust validation accuracy of", max(self.valid_accs_robust), "achieved after",
-                  np.argmax(self.valid_accs_robust) + 1, "epochs; ")
-        if self.validonadv:
-            print("Maximum (non-SWA) adversarial validation accuracy of", max(self.valid_accs_adv), "achieved after",
-                  np.argmax(self.valid_accs_adv) + 1, "epochs; ")
+
+        print('Total training time: ',
+              str(datetime.timedelta(seconds=max(self.elapsed_time))))
+
+        print("Maximum validation accuracy of",
+              max(self.valid_accs),
+              "achieved after",
+              np.argmax(self.valid_accs) + 1,
+              "epochs;")
+
+        if self.validonc and any(self.valid_accs_robust):
+            print("Maximum robust validation accuracy of",
+                  max(self.valid_accs_robust),
+                  "achieved after",
+                  np.argmax(self.valid_accs_robust) + 1,
+                  "epochs;")
+
+        if self.validonadv and any(self.valid_accs_adv):
+            print("Maximum adversarial validation accuracy of",
+                  max(self.valid_accs_adv),
+                  "achieved after",
+                  np.argmax(self.valid_accs_adv) + 1,
+                  "epochs;")
+
 
 class TestTracking:
     def __init__(self, dataset, modeltype, experiment, runs, combine_test_corruptions,
@@ -533,7 +838,7 @@ class TestTracking:
             if dataset in ['KITTI_RoadLane', 'KITTI_Distance_Multiclass']:
                 self.test_count += 24
             elif dataset in ['ImageNet', 'ImageNet-100']:
-                self.test_count += 35
+                self.test_count += 40
             else:
                 self.test_count += 34
         if combine_test_corruptions:
@@ -593,7 +898,7 @@ class TestTracking:
                                                     axis=0)
                 if self.dataset in ['ImageNet', 'ImageNet-100']:
                     test_metrics_string = np.append(test_metrics_string,
-                                                        ['Acc_A'],
+                                                        ['Acc_A', 'Acc_R', 'Acc_Sketch', 'Acc_ES-auto_exposure', 'Acc_ES-param_control', 'Acc_V2'],
                                                         axis=0)
 
             if self.calculate_adv_distance == True:

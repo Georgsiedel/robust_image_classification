@@ -871,7 +871,7 @@ class DataLoading():
         return c_datasets
     
     def load_data_a(self):
-        dataset_a = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-A/'),
+        dataset_a = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-a/'),
                                                                                 transform=self.transforms_preprocess_test,
                                                                         loader=custom_transforms.safe_kornia_loader)
         original_class_to_idx = self.testset.class_to_idx
@@ -888,6 +888,50 @@ class DataLoading():
         dataset_a.targets = [s[1] for s in new_samples]
 
         return dataset_a
+
+    def load_data_r(self):
+        dataset_r = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-r/'),
+                                                                                transform=self.transforms_preprocess_test,
+                                                                        loader=custom_transforms.safe_kornia_loader)
+        original_class_to_idx = self.testset.class_to_idx
+        dataset_r.class_to_idx = original_class_to_idx
+        # ImageFolder stores samples as (path, class_index). 
+        # We must re-map the indices based on the folder names.
+        new_samples = []
+        for path, _ in dataset_r.samples:
+            folder_name = path.split('/')[-2] # Extract folder name from path
+            correct_idx = original_class_to_idx[folder_name]
+            new_samples.append((path, correct_idx))
+
+        dataset_r.samples = new_samples
+        dataset_r.targets = [s[1] for s in new_samples]
+
+        return dataset_r
+
+    def load_data_es(self):
+        dataset_es_auto = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-es/test/auto_exposure/'),
+                                                                                transform=self.transforms_preprocess_test,
+                                                                        loader=custom_transforms.safe_kornia_loader)
+        dataset_es_param = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-es/test/param_control/'),
+                                                                                transform=self.transforms_preprocess_test,
+                                                                        loader=custom_transforms.safe_kornia_loader)
+        
+        return dataset_es_auto, dataset_es_param
+    
+    def load_data_sketch(self):
+        dataset_sketch = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-sketch/'),
+                                                                                transform=self.transforms_preprocess_test,
+                                                                        loader=custom_transforms.safe_kornia_loader)
+        return dataset_sketch
+    
+    def load_data_v2(self):
+
+        dataset_v2 = torchvision.datasets.ImageFolder(
+            root=os.path.abspath(f'{self.data_path}/{self.dataset}-v2-matched-frequency/'),
+            transform=self.transforms_preprocess_test,
+            loader=custom_transforms.safe_kornia_loader
+        )
+        return dataset_v2
                     
     def load_data_c(self, subset, subsetsize, valid_run, load_root='../data'):
 

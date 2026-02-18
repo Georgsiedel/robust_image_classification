@@ -369,7 +369,7 @@ if __name__ == '__main__':
 
     if args.swa['apply'] == True:
         swa_model = AveragedModel(model)
-        swa_start = args.epochs * args.swa['start_factor']
+        swa_start = args.epochs * args.swa['start_factor'] + args.warmupepochs
         swa_scheduler = SWALR(optimizer, anneal_strategy="linear", anneal_epochs=5, swa_lr=args.learningrate * args.swa['lr_factor'])
     else:
         swa_model, swa_scheduler = None, None
@@ -386,8 +386,8 @@ if __name__ == '__main__':
 
     # Resume from checkpoint
     if args.resume == True:
-        start_epoch, model, swa_model, optimizer, scheduler, swa_scheduler, _ = Checkpointer.load_model(model, swa_model,
-                                                                    optimizer, scheduler, swa_scheduler, 'standard')
+        start_epoch, model, swa_model, optimizer, scheduler, _ = Checkpointer.load_model(model, swa_model,
+                                                                    optimizer, scheduler, 'standard')
         Traintracker.load_learning_curves()
         print('\nResuming from checkpoint after epoch', start_epoch)
     

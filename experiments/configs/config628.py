@@ -2,11 +2,11 @@ import numpy as np
 
 train_corruptions = np.array([
 {'noise_type': 'standard', 'epsilon': 0.0, 'sphere': False, 'distribution': 'beta2-5'},
-#{'noise_type': 'uniform-linf', 'epsilon': 0.3, 'sphere': False, 'distribution': 'uniform'},
-#{'noise_type': 'uniform-l0.5', 'epsilon': 800000.0, 'sphere': False, 'distribution': 'uniform'},
-#{'noise_type': 'uniform-l1', 'epsilon': 400.0, 'sphere': False, 'distribution': 'uniform'},
-#{'noise_type': 'uniform-l2', 'epsilon': 10.0, 'sphere': False, 'distribution': 'uniform'},
-#{'noise_type': 'uniform-l0-impulse', 'epsilon': 0.24, 'sphere': False, 'distribution': 'uniform'},
+{'noise_type': 'uniform-linf', 'epsilon': 0.3, 'sphere': False, 'distribution': 'uniform'},
+{'noise_type': 'uniform-l0.5', 'epsilon': 800000.0, 'sphere': False, 'distribution': 'uniform'},
+{'noise_type': 'uniform-l1', 'epsilon': 400.0, 'sphere': False, 'distribution': 'uniform'},
+{'noise_type': 'uniform-l2', 'epsilon': 10.0, 'sphere': False, 'distribution': 'uniform'},
+{'noise_type': 'uniform-l0-impulse', 'epsilon': 0.24, 'sphere': False, 'distribution': 'uniform'},
 ])
 noise_sparsity = 1.0
 noise_patch_scale = {'lower': 0.2, 'upper': 0.7}
@@ -51,9 +51,9 @@ robust_loss = True
 robust_lossparams = {'num_splits': 3, 'alpha': 12} #jsd if 3 splits, KL divergence if 2 splits
 mixup = {'alpha': 0.2, 'p': 0.0} #default alpha 0.2 #If both mixup and cutmix are >0, mixup or cutmix are selected by 0.5 chance
 cutmix = {'alpha': 1.0, 'p': 0.0} # default alpha 1.0 #If both mixup and cutmix are >0, mixup or cutmix are selected by 0.5 chance
-manifold = {'apply': False, 'noise_factor': 3}
+manifold = {'apply': True, 'noise_factor': 3}
 n2n_deepaugment = False
-RandomEraseProbability = 0.0
+RandomEraseProbability = 0.3
 swa = {'apply': True, 'start_factor': 0.8, 'lr_factor': 0.2}
 
 #define train and test corruptions:
@@ -116,9 +116,9 @@ test_corruptions = np.array([
 
 test_on_c = True
 combine_test_corruptions = False #augment the test dataset with all corruptions
-calculate_adv_distance = False
-adv_distance_params = {'setsize': 500, 'iters_pgd': 500, 'eps_iter': [0.0003,0.005,0.2], 'iters_second_attack': 40, 'norm': ['inf', 2, 1],
-                       "clever": True, "clever_batches": [5,10,50,500], "clever_samples": [5,20,100,1024]}
+calculate_adv_distance = True
+adv_distance_params = {'setsize': 1000, 'iters_pgd': 500, 'eps_iter': [0.0005,0.01], 'iters_second_attack': 40, 'norm': ['inf', 2],
+                       "clever": False, "clever_batches": [5,10,50,500], "clever_samples": [5,20,100,1024]}
 calculate_autoattack_robustness = False
 autoattack_params = {'setsize': 1000, 'epsilon': 8/255, 'norm': 'Linf'}
 

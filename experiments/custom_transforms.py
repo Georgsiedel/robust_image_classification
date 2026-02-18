@@ -1,7 +1,6 @@
 import random
 import torch
 import torch.cuda.amp
-import torch.utils
 from torch.utils.data import DataLoader, Subset
 import torchvision.transforms.v2 as transforms_v2
 import torchvision.transforms as transforms
@@ -16,6 +15,7 @@ from typing import Optional
 from experiments.utils import plot_images
 import experiments.style_transfer as style_transfer
 from experiments.custom_datasets import StylizedTensorDataset
+from experiments.prime import init_standard_prime
 
 class TransformFactory:
     def __init__(self, re, soft_crop, style_path, strat_name, style, style_and_aug, dataset, minibatchsize=8):
@@ -58,6 +58,8 @@ class TransformFactory:
         
         if self.strat_name == 'None':
             transforms_potentially_masked = None
+        elif self.strat_name == 'PRIME':
+            transforms_potentially_masked = init_standard_prime()
         else:
             try:
                 transforms_potentially_masked = getattr(transforms_v2, self.strat_name)()
