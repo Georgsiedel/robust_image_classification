@@ -103,7 +103,7 @@ class CtModel(nn.Module):
         else:
             k = 0
 
-        if k == 0:  # Do deepaugemtn, input mixup and noise injection if k is 0
+        if k == 0:  # Do deepaugment, input mixup and noise injection if k is 0
                     
             if n2n_deepaugment: #apply deepaugment if True
                 if self.deepaugment_instance is None:

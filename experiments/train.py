@@ -367,12 +367,6 @@ if __name__ == '__main__':
         warmupscheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=args.warmupepochs)
         scheduler = optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmupscheduler, scheduler], milestones=[args.warmupepochs])
 
-    if args.swa['apply'] == True:
-        swa_model = AveragedModel(model)
-        swa_start = args.epochs * args.swa['start_factor'] + args.warmupepochs
-        swa_scheduler = SWALR(optimizer, anneal_strategy="linear", anneal_epochs=5, swa_lr=args.learningrate * args.swa['lr_factor'])
-    else:
-        swa_model, swa_scheduler = None, None
     Scaler = torch.amp.GradScaler(device=device)
     
     checkpoint_dir = Dataloader.trained_models_path
@@ -384,13 +378,33 @@ if __name__ == '__main__':
 
     start_epoch, end_epoch = 0, args.epochs + args.warmupepochs
 
+    swa_cfg = {
+            'swa_lr': args.learningrate * args.swa['lr_factor'],
+            'anneal_epochs': args.swa.get('anneal_epochs', 5),
+            'anneal_strategy': args.swa.get('anneal_strategy','linear')
+        } if args.swa['apply'] else None
+
     # Resume from checkpoint
-    if args.resume == True:
-        start_epoch, model, swa_model, optimizer, scheduler, _ = Checkpointer.load_model(model, swa_model,
-                                                                    optimizer, scheduler, 'standard')
+    if args.resume:
+
+        start_epoch, model, swa_model, optimizer, scheduler, swa_scheduler, _ = Checkpointer.load_model(
+            model, optimizer, scheduler,
+            use_swa=(args.swa['apply']), swa_cfg=swa_cfg, type='standard'
+        )
+
         Traintracker.load_learning_curves()
         print('\nResuming from checkpoint after epoch', start_epoch)
-    
+
+    # If not resuming but SWA is enabled, instantiate swa_model and swa_scheduler now (after optimizer created)
+    if args.swa['apply']:
+        swa_start = int(args.epochs * args.swa['start_factor'] + args.warmupepochs)
+
+        if not args.resume:
+            swa_model = AveragedModel(model)
+            swa_scheduler = SWALR(optimizer, **swa_cfg)
+    else:
+        swa_start, swa_model, swa_scheduler = None, None, None    
+
     # Calculate steps and epochs
     total_steps, start_steps = utils.calculate_steps(Dataloader.base_trainset, Dataloader.testset, args.batchsize, args.epochs, 
                                     start_epoch, args.warmupepochs, args.validonc, args.swa['apply'], args.swa['start_factor'])
@@ -399,7 +413,7 @@ if __name__ == '__main__':
         
         training_start_time = time.time()
         if args.resume == True:
-            training_start_time = training_start_time - max(Traintracker.elapsed_time)
+            training_start_time -= max(Traintracker.elapsed_time, default=0)
     
         # load augmented trainset and Dataloader
         Dataloader.load_augmented_traindata(target_size=len(Dataloader.base_trainset),

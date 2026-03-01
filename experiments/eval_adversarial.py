@@ -243,7 +243,7 @@ def second_attack_batch(fmodel, inputs, labels, number_iterations, norm):
     elif norm == np.inf:
         # HopSkipJump
         # HSJ in Foolbox is quite efficient
-        attack = fb.attacks.HopSkipJumpAttack(steps=number_iterations)
+        attack = fb.attacks.HopSkipJumpAttack(steps=number_iterations, init_attack=fb.attacks.LinfDeepFoolAttack(overshoot=0.1))
         raw_advs, clipped_advs, success = attack(fmodel, inputs, criterion, epsilons=None)
         return clipped_advs, success
         

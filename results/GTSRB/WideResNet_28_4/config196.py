@@ -1,10 +1,10 @@
 import numpy as np
 
 train_corruptions = np.array([
-{'noise_type': 'standard', 'epsilon': 0.0, 'sphere': False, 'distribution': 'beta2-5'},
+#{'noise_type': 'standard', 'epsilon': 0.0, 'sphere': False, 'distribution': 'beta2-5'},
 {'noise_type': 'uniform-linf', 'epsilon': 0.3, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l0.5', 'epsilon': 800000.0, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l1', 'epsilon': 400.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l0.5', 'epsilon': 800000.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l1', 'epsilon': 400.0, 'sphere': False, 'distribution': 'uniform'},
 {'noise_type': 'uniform-l2', 'epsilon': 10.0, 'sphere': False, 'distribution': 'uniform'},
 {'noise_type': 'uniform-l0-impulse', 'epsilon': 0.24, 'sphere': False, 'distribution': 'uniform'},
 ])

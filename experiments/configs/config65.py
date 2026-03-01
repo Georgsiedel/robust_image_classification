@@ -1,13 +1,14 @@
 import numpy as np
 
 train_corruptions = np.array([
-{'noise_type': 'standard', 'epsilon': 0.0, 'sphere': False, 'distribution': 'beta2-5'},
-{'noise_type': 'uniform-linf', 'epsilon': 1.0, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l0.5', 'epsilon': 10000000000.0, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l1', 'epsilon': 100000.0, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l2', 'epsilon': 200.0, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l0-impulse', 'epsilon': 0.5, 'sphere': False, 'distribution': 'uniform'},
+{'noise_type': 'NoisyMix', 'epsilon': 0.5, 'sphere': False, 'distribution': 'max'},
+#{'noise_type': 'uniform-linf', 'epsilon': 1.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l0.5', 'epsilon': 10000000000.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l1', 'epsilon': 100000.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l2', 'epsilon': 200.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l0-impulse', 'epsilon': 0.5, 'sphere': False, 'distribution': 'uniform'},
 ])
+
 noise_sparsity = 1.0
 noise_patch_scale = {'lower': 0.2, 'upper': 0.7}
 combine_train_corruptions = True #augment the train dataset with all corruptions

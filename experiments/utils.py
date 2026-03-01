@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import torch
+from torch.optim.swa_utils import AveragedModel, SWALR
 import shutil
 import argparse
 import ast
@@ -369,37 +370,47 @@ class Checkpoint:
             self.counter = 0
             self.best_model = True
 
-    def load_model(self, model, swa_model, optimizer, scheduler, type='standard', pbt=False):
+    def load_model(self, model, optimizer=None, scheduler=None,
+               use_swa=False, swa_cfg=None, type='standard', pbt=False):
         """
-        Loads checkpoint in a backwards-compatible and tolerant way.
+        Loads checkpoint robustly and (optionally) prepares SWA objects.
+
+        Args:
+            model: live model instance (should already be wrapped/compiled if you use DDP/torch.compile)
+            optimizer: live optimizer (may be None)
+            scheduler: live scheduler (may be None)
+            use_swa: bool - whether caller intends to use SWA for this run
+            swa_cfg: dict or None - configuration for SWALR creation (e.g. {'swa_lr': ..., 'anneal_epochs': ..., 'anneal_strategy': ...})
+            type: 'standard'|'best'
+            pbt: whether to restore history
 
         Returns:
             start_epoch, model, swa_model, optimizer, scheduler, swa_scheduler, history_blob
-        where history_blob is either None or a dict: {'columns': [...], 'values': ndarray}
-        The caller (Train_tracking) should adapt the history_blob into its own columns by calling
-        Train_tracking.from_checkpoint(history_blob, resume_epoch=start_epoch).
+
+        Notes:
+            - If swa_model/swa_scheduler are not requested or not present in checkpoint, returned values will be None.
+            - This function creates swa_model = AveragedModel(model) AFTER model + optimizer are loaded.
         """
+
         if not os.path.exists(self.checkpoint_path):
             raise FileNotFoundError(f"Checkpoint file not found: {self.checkpoint_path}")
 
-        checkpoint = torch.load(
-            self.checkpoint_path,
-            map_location='cpu',
-            weights_only=False  # explicitly restore old behavior
-        )
+        checkpoint = torch.load(self.checkpoint_path, map_location='cpu', weights_only=False)
 
-        # pick keys based on type
+        # pick keys
         if type == 'standard':
             model_key = "model_state_dict"
             optim_key = "optimizer_state_dict"
             sched_key = "scheduler_state_dict"
             swa_model_key = "swa_model_state_dict"
+            swa_sched_key = "swa_scheduler_state_dict"
             epoch_key = "epoch"
         elif type == 'best':
             model_key = "best_model_state_dict"
             optim_key = "best_optimizer_state_dict"
             sched_key = "best_scheduler_state_dict"
             swa_model_key = "best_swa_model_state_dict"
+            swa_sched_key = "best_swa_scheduler_state_dict"
             epoch_key = "best_epoch"
         else:
             raise ValueError("type must be 'standard' or 'best'")
@@ -407,11 +418,9 @@ class Checkpoint:
         # ---- MODEL ----
         model_state = checkpoint.get(model_key, None)
         if model_state is not None:
-            # filter out unwanted keys and try to load robustly
             filtered = _filter_deepaugment(model_state)
             ok, msg = _safe_model_load(model, filtered)
             if not ok:
-                # in case of failure, try another fallback: load with strict=False anyway
                 try:
                     model.load_state_dict(_strip_module_prefix(filtered), strict=False)
                     warnings.warn("Loaded model via fallback strict=False.")
@@ -439,43 +448,25 @@ class Checkpoint:
         elif scheduler is not None and sched_state is None:
             warnings.warn("No scheduler state found in checkpoint for this key; continuing with fresh scheduler.")
 
-        # ---- SWA model & scheduler (optional) ----
-        if swa_model is not None:
-            swa_state = checkpoint.get(swa_model_key, None)
-            if swa_state is not None:
-                # filter and load best-effort
-                swa_filtered = _filter_deepaugment(swa_state)
-                ok, _ = _safe_model_load(swa_model, swa_filtered)
-                if not ok:
-                    warnings.warn("SWA model partially/failed to load (some keys missing).")
-            else:
-                # if checkpoint lacks swa key, that's okay; just continue without SWA loaded
-                warnings.warn(f"No SWA model state '{swa_model_key}' found in checkpoint; skipping swa load.")
-
         # ---- HISTORY ----
         if pbt:
             raw_history = checkpoint.get('history', None)
         else:
             raw_history = None
 
-        # Normalize history into canonical dict form if present, and trim/pad to start_epoch
         history_blob = None
         if raw_history is not None:
             try:
-                # if it's already a dict with columns and values, use it
                 if isinstance(raw_history, dict) and 'columns' in raw_history and 'values' in raw_history:
                     cols = list(raw_history['columns'])
                     vals = np.asarray(raw_history['values'], dtype=float)
-                    # ensure 2D
                     if vals.ndim == 1:
                         vals = vals.reshape(-1, 1)
                 else:
-                    # try to coerce legacy list/ndarray into 2D array
                     vals = np.asarray(raw_history, dtype=float)
                     if vals.ndim == 1:
                         vals = vals.reshape(-1, 1)
                     cols = [f"col{i}" for i in range(vals.shape[1])]
-                # trim/pad rows to start_epoch
                 if vals.shape[0] > start_epoch:
                     vals = vals[:start_epoch, :]
                 elif vals.shape[0] < start_epoch:
@@ -485,10 +476,41 @@ class Checkpoint:
             except Exception as e:
                 warnings.warn(f"Failed to normalize checkpoint history: {e}")
                 history_blob = None
-        else:
-            history_blob = None
 
-        return start_epoch, model, swa_model, optimizer, scheduler, history_blob
+        # ---- SWA: create & load only after model+optimizer are loaded ----
+        swa_model = None
+        swa_scheduler = None
+
+        if use_swa:
+            swa_model = AveragedModel(model)
+
+            swa_state = checkpoint.get(swa_model_key, None)
+            if swa_state is not None:
+                swa_filtered = _filter_deepaugment(swa_state)
+                ok, _ = _safe_model_load(swa_model, swa_filtered)
+                if not ok:
+                    warnings.warn("SWA model partially/failed to load (some keys missing).")
+
+            if optimizer is None:
+                raise RuntimeError("use_swa=True but optimizer is None.")
+
+            if swa_cfg is None:
+                raise RuntimeError("use_swa=True but swa_cfg was not provided.")
+
+            # Let SWALR validate arguments. No defaults. No silent fixes.
+            swa_scheduler = SWALR(optimizer, **swa_cfg)
+
+            swa_sched_state = checkpoint.get(swa_sched_key, None)
+            if swa_sched_state is not None:
+                try:
+                    swa_scheduler.load_state_dict(swa_sched_state)
+                except Exception as e:
+                    warnings.warn(f"Failed to load swa_scheduler state: {e}")
+        # end use_swa handling
+        #for i, lr in enumerate(scheduler.get_last_lr()):
+        #    print(f"Param group {i}: {lr}")
+
+        return start_epoch, model, swa_model, optimizer, scheduler, swa_scheduler, history_blob
 
     def save_checkpoint(self, model, swa_model, optimizer, scheduler, swa_scheduler, epoch,
                         history=None):
@@ -498,6 +520,7 @@ class Checkpoint:
          - If checkpoint file doesn't exist when writing non-best, create a fresh one.
          - Accept history as Train_tracking instance, dict, list, or ndarray.
         """
+        
         # prepare swa_state dicts
         swa_state = None if swa_model is None else (swa_model.state_dict() if hasattr(swa_model, "state_dict") else None)
         swa_sched_state = None if swa_scheduler is None else (swa_scheduler.state_dict() if hasattr(swa_scheduler, "state_dict") else None)

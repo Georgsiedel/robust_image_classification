@@ -1,10 +1,10 @@
 import numpy as np
 
 train_corruptions = np.array([
-{'noise_type': 'standard', 'epsilon': 0.0, 'sphere': False, 'distribution': 'beta2-5'},
+#{'noise_type': 'standard', 'epsilon': 0.0, 'sphere': False, 'distribution': 'beta2-5'},
 {'noise_type': 'uniform-linf', 'epsilon': 0.3, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l0.5', 'epsilon': 800000.0, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l1', 'epsilon': 400.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l0.5', 'epsilon': 800000.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l1', 'epsilon': 400.0, 'sphere': False, 'distribution': 'uniform'},
 {'noise_type': 'uniform-l2', 'epsilon': 10.0, 'sphere': False, 'distribution': 'uniform'},
 {'noise_type': 'uniform-l0-impulse', 'epsilon': 0.24, 'sphere': False, 'distribution': 'uniform'},
 ])
@@ -117,7 +117,7 @@ test_corruptions = np.array([
 test_on_c = True
 combine_test_corruptions = False #augment the test dataset with all corruptions
 calculate_adv_distance = True
-adv_distance_params = {'setsize': 1000, 'iters_pgd': 200, 'eps_iter': [0.0005,0.01], 'iters_second_attack': 20, 'norm': ['inf', 2],
+adv_distance_params = {'setsize': 1000, 'iters_pgd': 1000, 'eps_iter': [0.0005,0.01], 'iters_second_attack': 40, 'norm': ['inf', 2],
                        "clever": False, "clever_batches": [5,10,50,500], "clever_samples": [5,20,100,1024]}
 calculate_autoattack_robustness = True
 autoattack_params = {'setsize': 1000, 'epsilon': 1/255, 'norm': 'Linf'}

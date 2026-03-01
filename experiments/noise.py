@@ -226,7 +226,18 @@ def apply_noise(batch, minibatchsize, corruptions, concurrent_combinations, norm
                 d = 1
             epsilon = float(d) * float(corruption['epsilon'])
             sparsity = random.random() * noise_sparsity
-            noisy_minibatch = sample_lp_corr_batch(corruption['noise_type'], epsilon, minibatch, corruption['sphere'], mean, std, manifold, sparsity)
+
+            if corruption['noise_type'] == 'NoisyMix':
+                noisy_minibatch = noise_up(
+                    minibatch,
+                    robust_samples=0,
+                    add_noise_level=epsilon,
+                    mult_noise_level=epsilon,
+                    sparse_level=0.65,
+                    l0_level=0.0,
+                )
+            else:
+                noisy_minibatch = sample_lp_corr_batch(corruption['noise_type'], epsilon, minibatch, corruption['sphere'], mean, std, manifold, sparsity)
 
         mask = random_erasing_style_mask(minibatch, noise_patch_lower_scale=noise_patch_lower_scale,
                                          noise_patch_upper_scale=noise_patch_upper_scale, ratio = [0.3, 3.3])

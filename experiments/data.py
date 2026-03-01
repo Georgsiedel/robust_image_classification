@@ -55,6 +55,23 @@ def seed_worker(worker_id):
     global fixed_worker_rng #impulse noise augmentations sk-learn function needs a separate rng for reproducibility
     fixed_worker_rng = np.random.default_rng()
 
+def get_class_to_idx_recursive(obj):
+    while obj is not None:
+        if hasattr(obj, "class_to_idx"):
+            return obj.class_to_idx
+
+        # Prioritize subset → dataset traversal
+        if hasattr(obj, "subset"):
+            obj = obj.subset
+        elif hasattr(obj, "dataset"):
+            obj = obj.dataset
+        elif hasattr(obj, "set"):
+            obj = obj.dataset
+        else:
+            break
+
+    raise AttributeError("No class_to_idx found in dataset hierarchy.")
+
 def extract_labels(dataset):
     """
     Return a flat list of labels (one entry per sample) for any dataset.
@@ -874,7 +891,7 @@ class DataLoading():
         dataset_a = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-a/'),
                                                                                 transform=self.transforms_preprocess_test,
                                                                         loader=custom_transforms.safe_kornia_loader)
-        original_class_to_idx = self.testset.class_to_idx
+        original_class_to_idx = get_class_to_idx_recursive(self.testset)
         dataset_a.class_to_idx = original_class_to_idx
         # ImageFolder stores samples as (path, class_index). 
         # We must re-map the indices based on the folder names.
@@ -893,7 +910,7 @@ class DataLoading():
         dataset_r = torchvision.datasets.ImageFolder(root=os.path.abspath(f'{self.data_path}/{self.dataset}-r/'),
                                                                                 transform=self.transforms_preprocess_test,
                                                                         loader=custom_transforms.safe_kornia_loader)
-        original_class_to_idx = self.testset.class_to_idx
+        original_class_to_idx = get_class_to_idx_recursive(self.testset)
         dataset_r.class_to_idx = original_class_to_idx
         # ImageFolder stores samples as (path, class_index). 
         # We must re-map the indices based on the folder names.
