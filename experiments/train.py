@@ -27,6 +27,7 @@ import losses
 import models
 from eval_corruptions import compute_c_corruptions
 from eval_adversarial import fast_gradient_validation
+from deepaugment_n2n import N2N_DeepAugment
 
 import torch.backends.cudnn as cudnn
 from run_0 import device
@@ -312,13 +313,15 @@ def valid_epoch(pbar, net):
     adv_acc = 100. * adv_correct / total
     return acc, avg_test_loss, acc_c, adv_acc
 
-def update_bn_with_aug(dataloader, model, augment_fn):
+def update_bn_with_aug(dataloader, model, augment_fn, deep_aug):
     model.train()
     with torch.no_grad():
         for inputs, _ in dataloader:
             inputs = inputs.to(device)
             if augment_fn:
                 inputs, _ = augment_fn(inputs)
+            if deep_aug:
+                inputs = deep_aug(inputs)
             model(inputs)
     return model
 
@@ -468,10 +471,18 @@ if __name__ == '__main__':
             SWA_Loader = custom_datasets.SwaLoader(trainloader, args.batchsize, criterion.robust_samples)
             trainloader = SWA_Loader.get_swa_dataloader()
         
-        bn_transform = Dataloader.during_train_transform if args.stylization_first == True else None
+        images, *_ = next(iter(trainloader))
+        bn_transform = Dataloader.during_train_transform if not args.stylization_first else None
+        deep_aug = N2N_DeepAugment(
+                    orig_batch_size=images.shape[0],
+                    image_size=images.shape[2],
+                    channels=images.shape[1],
+                    noisenet_max_eps=0.75,
+                    ratio=0.5,
+                ) if args.n2n_deepaugment else None
+
         #Custom batchnorm update when we do augmentations in the train loop instead of in the dataloader 
-        swa_model = update_bn_with_aug(trainloader, swa_model, Dataloader.during_train_transform)
-        #torch.optim.swa_utils.update_bn(trainloader, swa_model, device)
+        swa_model = update_bn_with_aug(trainloader, swa_model, bn_transform, deep_aug)
         model = swa_model
 
     Checkpointer.save_final_model(model, optimizer, scheduler, end_epoch)

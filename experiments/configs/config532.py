@@ -116,10 +116,10 @@ test_corruptions = np.array([
 
 test_on_c = True
 combine_test_corruptions = False #augment the test dataset with all corruptions
-calculate_adv_distance = True
+calculate_adv_distance = False
 adv_distance_params = {'setsize': 1000, 'iters_pgd': 1000, 'eps_iter': [0.0001,0.01], 'iters_second_attack': 40, 'norm': ['inf', 2],
                        "clever": False, "clever_batches": [10], "clever_samples": [10]}
-calculate_autoattack_robustness = True
+calculate_autoattack_robustness = False
 autoattack_params = {'setsize': 1000, 'epsilon': 1/255, 'norm': 'Linf'}
 
 if dataset == 'CIFAR10':

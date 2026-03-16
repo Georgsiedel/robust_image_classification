@@ -61,9 +61,9 @@ swa = {'apply': True, 'start_factor': 0.8, 'lr_factor': 0.2}
 #define intensity (second column): max.-distance of random perturbations for model training and evaluation (gaussian: std-dev; l0: proportion of pixels corrupted; lp: epsilon)
 #define whether density_distribution=max (third column) is True (sample only maximum intensity values) or False (uniformly distributed up to maximum intensity)
 test_corruptions = np.array([
-{'noise_type': 'uniform-l1', 'epsilon': 1403.4, 'sphere': False, 'distribution': 'max'},
-{'noise_type': 'uniform-l2', 'epsilon': 10.37, 'sphere': False, 'distribution': 'max'},
-{'noise_type': 'uniform-linf', 'epsilon': 0.1446, 'sphere': False, 'distribution': 'max'},
+{'noise_type': 'uniform-l1', 'epsilon': 1403.4, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-l2', 'epsilon': 10.37, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-linf', 'epsilon': 0.1446, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-l0.5', 'epsilon': 200000000.0, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-l1', 'epsilon': 2500.0, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-l2', 'epsilon': 8.0, 'sphere': True, 'distribution': 'max'},

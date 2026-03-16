@@ -9,8 +9,8 @@ train_corruptions = np.array([
 #{'noise_type': 'uniform-l0-impulse', 'epsilon': 0.24, 'sphere': False, 'distribution': 'uniform'},
 ])
 
-noise_sparsity = 1.0
-noise_patch_scale = {'lower': 0.2, 'upper': 0.7}
+noise_sparsity = 0.0
+noise_patch_scale = {'lower': 1.0, 'upper': 1.0}
 combine_train_corruptions = True #augment the train dataset with all corruptions
 concurrent_combinations = 1 #only has an effect if combine_train_corruption is True
 

@@ -84,10 +84,10 @@ class SwaLoader():
         self.robust_samples = robust_samples
 
     def concatenate_collate_fn(self, batch):
-        concatenated_batch = []
-        for images, label in batch:
-            concatenated_batch.extend(images)
-        return torch.stack(concatenated_batch), label
+        #stack clean and augmented views 
+        images, labels = zip(*batch)       
+        images = torch.cat([torch.stack(x) for x in zip(*images)], dim=0)
+        return images, torch.tensor(labels)
 
     def get_swa_dataloader(self):
         # Create a new DataLoader with the custom collate function

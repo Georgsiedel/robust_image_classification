@@ -61,9 +61,9 @@ swa = {'apply': True, 'start_factor': 0.8, 'lr_factor': 0.2}
 #define intensity (second column): max.-distance of random perturbations for model training and evaluation (gaussian: std-dev; l0: proportion of pixels corrupted; lp: epsilon)
 #define whether density_distribution=max (third column) is True (sample only maximum intensity values) or False (uniformly distributed up to maximum intensity)
 test_corruptions = np.array([
-{'noise_type': 'uniform-l1', 'epsilon': 8.766, 'sphere': False, 'distribution': 'max'},
-{'noise_type': 'uniform-l2', 'epsilon': 0.2137, 'sphere': False, 'distribution': 'max'},
-{'noise_type': 'uniform-linf', 'epsilon': 0.0163, 'sphere': False, 'distribution': 'max'},
+{'noise_type': 'uniform-l1', 'epsilon': 8.766, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-l2', 'epsilon': 0.2137, 'sphere': True, 'distribution': 'max'},
+{'noise_type': 'uniform-linf', 'epsilon': 0.0163, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-l0.5', 'epsilon': 25000.0, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-l1', 'epsilon': 25.0, 'sphere': True, 'distribution': 'max'},
 {'noise_type': 'uniform-l2', 'epsilon': 0.5, 'sphere': True, 'distribution': 'max'},
@@ -116,10 +116,10 @@ test_corruptions = np.array([
 
 test_on_c = True
 combine_test_corruptions = False #augment the test dataset with all corruptions
-calculate_adv_distance = True
+calculate_adv_distance = False
 adv_distance_params = {'setsize': 1000, 'iters_pgd': 1000, 'eps_iter': [0.0005,0.01], 'iters_second_attack': 40, 'norm': ['inf', 2],
                        "clever": False, "clever_batches": [5,10,50,500], "clever_samples": [5,20,100,1024]}
-calculate_autoattack_robustness = True
+calculate_autoattack_robustness = False
 autoattack_params = {'setsize': 1000, 'epsilon': 1/255, 'norm': 'Linf'}
 
 if dataset == 'CIFAR10':

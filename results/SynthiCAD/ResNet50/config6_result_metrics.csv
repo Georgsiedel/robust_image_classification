@@ -35,9 +35,9 @@ Acc_C-original-15;22,2167
 Acc_C-bar-10;11,0115
 Acc_all-ex-pixelwise-noise-24;20,5970
 RMSCE_C;0,4479
-uniform-l1,13.27,False,max;99,9650
-uniform-l2,0.419,False,max;99,9650
-uniform-linf,0.0332,False,max;10,0000
+uniform-l1,13.27,True,max;99,9650
+uniform-l2,0.419,True,max;99,9700
+uniform-linf,0.0332,True,max;10,0000
 uniform-l0.5,200000000.0,True,max;10,0000
 uniform-l1,2500.0,True,max;10,0000
 uniform-l2,8.0,True,max;10,0000
@@ -86,6 +86,6 @@ uniform-linf,0.1,False,max;10,0000
 uniform-linf,0.2,False,max;10,0000
 uniform-linf,0.5,False,max;10,0000
 uniform-linf,1.0,False,max;10,0000
-Class Separation Robustness;69,9767
+Class Separation Robustness;69,9783
 imperceptible Robustness;10,0000
 Average p-norm robustness;10,0000

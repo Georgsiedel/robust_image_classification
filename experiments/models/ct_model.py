@@ -51,12 +51,23 @@ class CtModel(nn.Module):
                     
             if n2n_deepaugment: #apply deepaugment if True
                 if self.deepaugment_instance is None:
-                    self.deepaugment_instance = N2N_DeepAugment(orig_batch_size=out.shape[0], 
+                    deepaugment = N2N_DeepAugment(orig_batch_size=out.shape[0], 
                                                                 image_size=out.shape[2], 
                                                                 channels=out.shape[1],
                                                                 noisenet_max_eps=0.75, 
                                                                 ratio=0.5)
-                out = self.deepaugment_instance(out)
+                    # bypass PyTorch module registration
+                    object.__setattr__(self, "deepaugment_instance", deepaugment)
+                    
+                if robust_samples == 2:
+                    q = int(out.shape[0] / 3)
+                    out[q*1:q*3] = self.deepaugment_instance(out[q*1:q*3])
+                elif robust_samples == 1:
+                    q = int(out.shape[0] / 2)
+                    out[q*1:q*2] = self.deepaugment_instance(out[q*1:q*2])
+                else:
+                    out = self.deepaugment_instance(out)
+
             mixed_out, targets = mixup_process(out, targets, robust_samples, self.num_classes, mixup_alpha, mixup_p,
                                          cutmix_alpha, cutmix_p, generated_ratio, manifold=False, inplace=True)
             noisy_out = apply_noise(mixed_out, noise_minibatchsize, corruptions, concurrent_combinations,
@@ -107,12 +118,23 @@ class CtModel(nn.Module):
                     
             if n2n_deepaugment: #apply deepaugment if True
                 if self.deepaugment_instance is None:
-                    self.deepaugment_instance = N2N_DeepAugment(orig_batch_size=out.shape[0], 
+                    deepaugment = N2N_DeepAugment(orig_batch_size=out.shape[0], 
                                                                 image_size=out.shape[2], 
                                                                 channels=out.shape[1],
                                                                 noisenet_max_eps=0.75, 
                                                                 ratio=0.5)
-                out = self.deepaugment_instance(out)
+                    # bypass PyTorch module registration
+                    object.__setattr__(self, "deepaugment_instance", deepaugment)
+
+                if robust_samples == 2:
+                    q = int(out.shape[0] / 3)
+                    out[q*1:q*3] = self.deepaugment_instance(out[q*1:q*3])
+                elif robust_samples == 1:
+                    q = int(out.shape[0] / 2)
+                    out[q*1:q*2] = self.deepaugment_instance(out[q*1:q*2])
+                else:
+                    out = self.deepaugment_instance(out)
+
             mixed_out, targets = mixup_process(out, targets, robust_samples, self.num_classes, mixup_alpha, mixup_p,
                                          cutmix_alpha, cutmix_p, generated_ratio, manifold=False, inplace=False)
             noisy_out = apply_noise(mixed_out, noise_minibatchsize, corruptions, concurrent_combinations,
