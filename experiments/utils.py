@@ -148,7 +148,6 @@ def plot_images(
             #axs[i, 2].axis('off')
             axs[i, 2].set_xlabel(labels[i], fontsize=10)
 
-    plt.tight_layout()  # Adjust layout to prevent overlapping
     if save:
         plt.savefig(f"./corruption_examples.png")  # Save the figure
     plt.show()
