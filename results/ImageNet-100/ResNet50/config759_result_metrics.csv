@@ -1,0 +1,6 @@
+;config_759_avg
+Standard_Acc;86,2200
+RMSCE;0,2595
+Adversarial_accuracy_autoattack_Linf_0.00392156862745098;50,1000
+Adversarial_accuracy_autoattack_L1_20;67,1000
+Combined_Noise;83,8000

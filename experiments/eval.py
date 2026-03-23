@@ -105,9 +105,9 @@ def compute_clean(testloader, model, num_classes, multilabel = False):
 
 if __name__ == '__main__':
     Testtracker = utils.TestTracking(args.dataset, args.modeltype, args.experiment, args.runs,
-                                args.combine_test_corruptions, args.test_on_c,
-                                args.calculate_adv_distance, args.calculate_autoattack_robustness,
-                                test_corruptions, args.adv_distance_params, args.kaggle, args.pbt)
+                                args.combine_test_corruptions, args.test_on_c, args.calculate_adv_distance, 
+                                args.calculate_autoattack_robustness, args.autoattack_params, test_corruptions, 
+                                args.adv_distance_params, args.kaggle, args.pbt)
 
     for run in range(args.runs):
 
@@ -207,9 +207,9 @@ if __name__ == '__main__':
                 Testtracker.save_adv_distance(dist_sorted)
 
             if args.calculate_autoattack_robustness == True:  # adversarial accuracy calculation
-                adv_acc_aa = eval_adversarial.compute_adv_acc(args.autoattack_params, Dataloader.testset,
+                adv_accs_aa = eval_adversarial.compute_adv_acc(args.autoattack_params, Dataloader.testset,
                                                                             model, 0, args.batchsize)
-                Testtracker.track_results([adv_acc_aa], i)
+                Testtracker.track_results(adv_accs_aa, i)
 
             # Robust Accuracy on p-norm noise - either combined or separate noise types
             accs = eval_corruptions.select_p_corruptions(testloader, model, test_corruptions, args.dataset, args.combine_test_corruptions)

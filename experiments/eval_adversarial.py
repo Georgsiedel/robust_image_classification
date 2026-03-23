@@ -95,18 +95,23 @@ def compute_adv_acc(autoattack_params, testset, model, workers, batchsize=50):
                                 len(testset)-autoattack_params["setsize"]], generator=torch.Generator().manual_seed(42))
     truncated_testloader = DataLoader(truncated_testset, batch_size=autoattack_params["setsize"], shuffle=False,
                                        pin_memory=True, num_workers=workers)
-    adversary = AutoAttack(model, norm=autoattack_params['norm'], eps=autoattack_params['epsilon'], version='standard')
-    correct, total = 0, 0
-    if autoattack_params["norm"] == 'Linf':
-        autoattack_params["norm"] = np.inf
-    else:
-        autoattack_params["norm"] = autoattack_params["norm"][1:]
-    for batch_id, (inputs, targets) in enumerate(truncated_testloader):
-        adv_inputs, adv_predicted = adversary.run_standard_evaluation(inputs, targets, bs=batchsize, return_labels=True)
 
-    correct += (adv_predicted == targets).sum().item()
-    total += targets.size(0)
-    adv_acc = correct / total * 100
+    if len(autoattack_params['norm']) != len(autoattack_params['epsilon']):
+        raise ValueError("Please provide an epsilon attack budget for every norm")
+
+    adv_acc = []
+    for norm, eps in zip(autoattack_params['norm'], autoattack_params['epsilon']):   
+
+        adversary = AutoAttack(model, norm=norm, eps=eps, version='standard')
+        correct, total = 0, 0
+
+        for batch_id, (inputs, targets) in enumerate(truncated_testloader):
+            adv_inputs, adv_predicted = adversary.run_standard_evaluation(inputs, targets, bs=batchsize, return_labels=True)
+
+        correct += (adv_predicted == targets).sum().item()
+        total += targets.size(0)
+        adv_acc.append(correct / total * 100)
+
     return adv_acc
 
 def clever_score(testloader, evalmodel, clever_batches, clever_samples, epsilon, norm, setsize):

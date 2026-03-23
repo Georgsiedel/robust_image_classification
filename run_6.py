@@ -18,13 +18,13 @@ if __name__ == '__main__':
         print('Starting experiment #',experiment, 'on', config.dataset, 'dataset')
         runs = 1
         run_iters = [0]
-        if experiment in [522]:
+        if experiment in []:
             runs = 3
-            run_iters = [1,2]
+            run_iters = [2]
 
         for run in run_iters:
 
-            resume = True if experiment in [522] and run in [1] else False
+            resume = True if experiment in [] and run in [] else False
 
             print("Training run #",run)
             cmd0 = f"python experiments/train.py --resume={resume} --run={run} --experiment={experiment} --epochs=" \
@@ -49,7 +49,7 @@ if __name__ == '__main__':
                     f"\"{config.noise_patch_scale}\" --generated_ratio={config.generated_ratio} " \
                     f"--n2n_deepaugment={config.n2n_deepaugment} --stylization_first={stylization_first} " \
                     f"--kaggle={kaggle} "
-            if experiment in []:
+            if experiment in [522]:
                 print('skip')
             else:
                 os.system(cmd0)

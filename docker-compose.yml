@@ -29,7 +29,7 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: "1"  # Restrict to GPU 1
     #command: python run_exp_1.py  # Run a different script for this container
-    cpuset: "16-31"
+    #cpuset: "16-31"
     tty: true
 
   python-gpu-container-gpu2:

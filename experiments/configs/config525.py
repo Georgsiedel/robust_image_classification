@@ -114,13 +114,13 @@ test_corruptions = np.array([
 {'noise_type': 'uniform-linf', 'epsilon': 1.0, 'sphere': False, 'distribution': 'max'},
 ])
 
-test_on_c = True
-combine_test_corruptions = False #augment the test dataset with all corruptions
+test_on_c = False
+combine_test_corruptions = True #augment the test dataset with all corruptions
 calculate_adv_distance = True
-adv_distance_params = {'setsize': 1000, 'iters_pgd': 1000, 'eps_iter': [0.0001,0.01], 'iters_second_attack': 40, 'norm': ['inf', 2],
+adv_distance_params = {'setsize': 1000, 'iters_pgd': 1000, 'eps_iter': [0.01], 'iters_second_attack': 40, 'norm': [2],
                        "clever": False, "clever_batches": [10], "clever_samples": [10]}
-calculate_autoattack_robustness = True
-autoattack_params = {'setsize': 1000, 'epsilon': 1/255, 'norm': 'Linf'}
+calculate_autoattack_robustness = False
+autoattack_params = {'setsize': 1000, 'epsilon': [0.5, 20], 'norm': ['L2', 'L1']}
 
 if dataset == 'CIFAR10':
     num_classes = 10

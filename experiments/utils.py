@@ -817,8 +817,8 @@ class TrainTracking:
 
 class TestTracking:
     def __init__(self, dataset, modeltype, experiment, runs, combine_test_corruptions,
-                      test_on_c, calculate_adv_distance, calculate_autoattack_robustness,
-                 test_corruptions, adv_distance_params, kaggle, pbt=False):
+                      test_on_c, calculate_adv_distance, calculate_autoattack_robustness, 
+                      autoattack_params, test_corruptions, adv_distance_params, kaggle, pbt=False):
         self.dataset = dataset
         self.modeltype = modeltype
         self.experiment = experiment
@@ -827,6 +827,7 @@ class TestTracking:
         self.test_on_c = test_on_c
         self.calculate_adv_distance = calculate_adv_distance
         self.calculate_autoattack_robustness = calculate_autoattack_robustness
+        self.autoattack_params = autoattack_params
         self.test_corruptions = test_corruptions
 
         self.adv_distance_params = adv_distance_params
@@ -872,7 +873,7 @@ class TestTracking:
             self.adv_count += len(self.adv_distance_params["norm"]) * len(self.adv_distance_params["clever_samples"])
             self.test_count += self.adv_count
         if calculate_autoattack_robustness:
-            self.test_count += 1
+            self.test_count += len(autoattack_params['norm'])
 
         self.all_test_metrics = np.empty([self.test_count, self.runs])
         if pbt == True:
@@ -934,8 +935,9 @@ class TestTracking:
                         test_metrics_string = np.append(test_metrics_string,
                                                             [f'{n}-norm-Mean_CLEVER-{b}-samples'], axis=0)
             if self.calculate_autoattack_robustness == True:
-                test_metrics_string = np.append(test_metrics_string,
-                                                    ['Adversarial_accuracy_autoattack'])
+                for norm, eps in zip(self.autoattack_params['norm'], self.autoattack_params['epsilon']):
+                    test_metrics_string = np.append(test_metrics_string,
+                                                        [f'Adversarial_accuracy_autoattack_{norm}_{eps}'])
             if self.combine_test_corruptions == True:
                 test_metrics_string = np.append(test_metrics_string, ['Combined_Noise'])
             else:
