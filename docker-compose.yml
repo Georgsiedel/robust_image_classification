@@ -3,18 +3,18 @@ version: '3.8'
 services:
   python-gpu-container-gpu0:
     build:
-      context: . # Path to the Dockerfile (current directory)
+      context: .
       dockerfile: Dockerfile
       args:
-        USER_ID: ${UID:-1000}
-        GROUP_ID: ${GID:-1000}
-    user: "${UID:-1000}:${GID:-1000}"
+        USER_ID: ${HOST_UID:-1000}
+        GROUP_ID: ${HOST_GID:-1000}
+    #user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     shm_size: '128g'
     runtime: nvidia
     environment:
       NVIDIA_VISIBLE_DEVICES: "0"  # Restrict to GPU 0
-      CUDA_HOME: "/usr/local/cuda"
-      LD_LIBRARY_PATH: "/usr/local/lib:/usr/lib:/lib:$LD_LIBRARY_PATH"
+      #CUDA_HOME: "/usr/local/cuda"
+      #LD_LIBRARY_PATH: "/usr/local/lib:/usr/lib:/lib:$LD_LIBRARY_PATH"
     volumes:
       - ../datasets:/data
       - ../trained_models:/trained_models
@@ -22,6 +22,7 @@ services:
     #cpuset: "0-15"
     #command: python run_exp.py  # Run the main script for this container
     tty: true
+    stdin_open: true
 
   python-gpu-container-gpu1:
     extends:
@@ -31,6 +32,7 @@ services:
     #command: python run_exp_1.py  # Run a different script for this container
     #cpuset: "16-31"
     tty: true
+    stdin_open: true
 
   python-gpu-container-gpu2:
     extends:
@@ -40,6 +42,7 @@ services:
     cpuset: "32-47"
     #command: python run_exp_2.py  # Run a different script for this container
     tty: true
+    stdin_open: true
 
   python-gpu-container-gpu3:
     extends:
@@ -49,6 +52,7 @@ services:
     cpuset: "48-63"
     #command: python run_exp_3.py  # Run a different script for this container
     tty: true
+    stdin_open: true
 
   python-gpu-container-gpu4:
     extends:
@@ -58,6 +62,7 @@ services:
     cpuset: "64-79"
     #command: python run_exp_4.py  # Run a different script for this container
     tty: true
+    stdin_open: true
 
   python-gpu-container-gpu5:
     extends:
@@ -67,6 +72,7 @@ services:
     cpuset: "80-95"
     #command: python run_exp_5.py  # Run a different script for this container
     tty: true
+    stdin_open: true
 
   python-gpu-container-gpu6:
     extends:
@@ -76,6 +82,7 @@ services:
     cpuset: "96-111"
     #command: python run_exp_6.py  # Run a different script for this container
     tty: true
+    stdin_open: true
 
   python-gpu-container-gpu7:
     extends:
@@ -85,3 +92,4 @@ services:
     cpuset: "112-127"
     #command: python run_exp_7.py  # Run a different script for this container
     tty: true
+    stdin_open: true

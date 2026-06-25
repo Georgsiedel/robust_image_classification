@@ -1,55 +1,56 @@
-# Start from NVIDIA's CUDA image with cuDNN and Ubuntu 22.04
-FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
-# Set environment variables
+# Set environment variables natively
 ENV CUDA_HOME=/usr/local/cuda
-ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 ENV PATH=/usr/local/cuda/bin:$PATH
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 
-# Install dependencies
+# Redirect Matplotlib cache to avoid home directory permission issues
+ENV MPLCONFIGDIR=/tmp/matplotlib
+
+# Prevent interactive installation prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install all system requirements cleanly in one layer
 RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-distutils \
-    python3.11-venv \
+    python3.10 \
+    python3.10-distutils \
+    python3.10-venv \
     git \
     build-essential \
     libpng-dev \
     libgl1-mesa-glx \
     libglib2.0-0 \
     && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
-# Create and activate a virtual environment for Python 3.11
-RUN python3.11 -m venv /opt/venv
-
-# Ensure the virtual environment is used for all Python commands
+# Create and isolate virtual environment
+RUN python3.10 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-
-# Upgrade pip in the virtual environment
 RUN pip install --upgrade pip
 
-# Accept UID/GID from build args with defaults
+# Create unprivileged execution target matching host identity
 ARG USER_ID=1000
 ARG GROUP_ID=1000
-
-# Create group and user matching host UID/GID
 RUN groupadd -g ${GROUP_ID} appgroup && \
     useradd -m -u ${USER_ID} -g appgroup appuser
 
-# Set the working directory inside the container
 WORKDIR /workspace
 
-# Install Python dependencies (requirements.txt should be in your repo)
+#Force pip on torch for cuda 12.4
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Install requirements before copying target logic to leverage cache layers
 COPY requirements.txt /workspace/
-RUN apt-get update && apt-get install -y libgl1-mesa-glx
-RUN apt-get update && apt-get install -y libglib2.0-0
-RUN pip install -r /workspace/requirements.txt
+RUN pip install --no-cache-dir -r /workspace/requirements.txt
 
-# Copy your repository code into the container
-#COPY . /workspace/
+# Force permissions in various directories
+RUN chmod 755 /home && \
+    chmod 1777 /tmp && \
+    chown -R appuser:appgroup /home/appuser /workspace /opt/venv && \
+    chmod -R 755 /home/appuser /bin /usr/bin /usr/local/bin /lib /lib64 /opt/venv
 
-# Switch to that user
+# Switch context to the mapped unprivileged identity safely
 USER appuser
 
-# Command to run your app
 CMD ["bash"]
