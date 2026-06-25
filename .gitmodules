@@ -1,0 +1,3 @@
+[submodule "micro_ast"]
+	path = micro_ast
+	url = https://github.com/EndyWon/MicroAST
