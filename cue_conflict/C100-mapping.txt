@@ -1,8 +1,0 @@
-keyboard=['computer keyboard']
-elephant=['elephant']
-bicycle=['bicycle']
-clock=['clock']
-chair=['chair']
-bear=['bear']
-bottle=['bottles']
-car=['streetcar']
