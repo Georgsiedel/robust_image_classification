@@ -2,11 +2,13 @@
     "data_kaggle": "/kaggle/input/model-based-classification",
     "write_data_kaggle": "/kaggle/working/data",
     "trained_models_kaggle": "/kaggle/working/trained_models",
-    "style_feats_kaggle": "/kaggle/input/model-based-classification/style_feats_adain_1000.npy",
+    "style_feats_nst_kaggle": "/kaggle/input/model-based-classification/style_feats_adain_1000.npy",
+    "style_feats_ast_kaggle": "/kaggle/input/model-based-classification/style_distribution.npz",
     "c_labels_kaggle": "/kaggle/input/model-based-classification",
     "data": "../data",
     "write_data": "../data",
     "trained_models": "../trained_models",
-    "style_feats": "../data/style_feats_adain_1000.npy",
-    "c_labels": "../data"
+    "style_feats_nst": "../data/style_feats_adain_1000.npy",
+    "style_feats_ast": "../data/style_distribution.npz",
+    "c_labels": "./data"
 }

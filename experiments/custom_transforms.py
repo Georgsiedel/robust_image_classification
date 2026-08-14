@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, Subset
 import torchvision.transforms.v2 as transforms_v2
 import torchvision.transforms as transforms
 from run_0 import device
+from pathlib import Path
 import gc
 import experiments.eval_corruption_transforms as c
 import torch
@@ -13,46 +14,64 @@ import numpy as np
 import kornia
 from typing import Optional
 from experiments.utils import plot_images
-import experiments.style_transfer as style_transfer
+from experiments.style_transforms import NSTRectangularTransform, MicroASTAugmentation
 from experiments.custom_datasets import StylizedTensorDataset
 from experiments.prime import init_standard_prime
 
+CURRENT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = CURRENT_DIR.parent
+
 class TransformFactory:
-    def __init__(self, re, soft_crop, style_path, strat_name, style, style_and_aug, dataset, minibatchsize=8):
+    def __init__(self, re, soft_crop, style_path_nst, style_path_ast, strat_name, style, style_and_aug, 
+                dataset, minibatchsize=8):
         self.re = re
         self.TAc = CustomTA_color()
         self.TAg = CustomTA_geometric()
         self.strat_name = strat_name
         self.style = style
         self.style_and_aug = style_and_aug
-        self.style_path = style_path
+        self.style_path_nst = style_path_nst
+        self.style_path_ast = style_path_ast
         self.minibatchsize = minibatchsize
         self.dataset = dataset
         self.soft_crop = soft_crop
 
-    def _stylization(self, probability=1.0, alpha_min=0.2, alpha_max=1.0):
-        vgg, decoder = style_transfer.load_models()
-        style_feats = style_transfer.load_feat_files(self.style_path)
-        if self.dataset in ['KITTI_RoadLane', 'KITTI_Distance_Multiclass']:
-            style_transforms = style_transfer.NSTTransform_rectangular(style_feats, 
-                                                                        vgg, 
-                                                                        decoder, 
-                                                                        alpha_min=alpha_min, 
-                                                                        alpha_max=alpha_max, 
-                                                                        probability=probability,
-                                                                        overlap=64)
+    def _stylization(self, style_type='nst', probability=1.0, alpha_min=0.2, alpha_max=1.0):
+        
+        if style_type == 'nst':
+            # Instantiate the unified AdaIN transform
+            return NSTRectangularTransform.from_files(
+                style_feats_path= REPO_ROOT / self.style_path_nst,
+                encoder_path=REPO_ROOT / "experiments/adaIN/vgg_normalised.pth",
+                decoder_path=REPO_ROOT / "experiments/adaIN/decoder.pth",
+                alpha_min=alpha_min,
+                alpha_max=alpha_max,
+                probability=probability,
+                patch_size=224,
+                overlap=32 # Carried over your 64px overlap preference
+            )
+            
+        elif style_type == 'microast':
+            # Instantiate the MicroAST transform
+            return MicroASTAugmentation(
+                style_feats_path= REPO_ROOT / self.style_path_ast,
+                content_encoder_path=REPO_ROOT / "micro_ast/models/content_encoder_iter_160000.pth.tar", # Update if your micro_ast encoder is named differently
+                decoder_path=REPO_ROOT / "micro_ast/models/decoder_iter_160000.pth.tar",               # Update if your micro_ast decoder is named differently
+                device=device,
+                probability=probability,
+                alpha_min=alpha_min,
+                alpha_max=alpha_max,
+                min_spatial_size=224
+            )
+            
         else:
-            style_transforms = style_transfer.NSTTransform(style_feats, 
-                                                           vgg, decoder, 
-                                                           alpha_min=alpha_min, 
-                                                           alpha_max=alpha_max, 
-                                                           probability=probability)
-        return style_transforms
+            raise ValueError(f"Unknown style type: {style_type}. Expected 'nst' or 'microast'.")
 
     def get_transforms(self):
         batch_transforms = BatchStyleTransforms(stylized_ratio=self.style['probability'], 
                                            batch_size=100, 
-                                           transform_style=self._stylization(probability=1.0, 
+                                           transform_style=self._stylization(style_type=self.style['type'],
+                                                                            probability=1.0, 
                                                                              alpha_min=self.style['alpha_min'], 
                                                                              alpha_max=self.style['alpha_max']))
         

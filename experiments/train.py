@@ -170,10 +170,6 @@ def train_epoch(pbar):
         style_iter = iter(style_dataloader)
 
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        #plot_images(5, 
-        #                torch.tensor([0.0,0.0,0.0]).view(1, 3, 1, 1), 
-        #                torch.tensor([1.0,1.0,1.0]).view(1, 3, 1, 1),
-        #                inputs, targets)
 
         optimizer.zero_grad()
         if criterion.robust_samples >= 1:

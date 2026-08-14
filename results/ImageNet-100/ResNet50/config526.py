@@ -1,12 +1,12 @@
 import numpy as np
 
 train_corruptions = np.array([
-#{'noise_type': 'standard', 'epsilon': 0.0, 'sphere': False, 'distribution': 'beta2-5'},
-{'noise_type': 'uniform-linf', 'epsilon': 0.6, 'sphere': False, 'distribution': 'uniform'},
+{'noise_type': 'standard', 'epsilon': 0.0, 'sphere': False, 'distribution': 'beta2-5'},
+#{'noise_type': 'uniform-linf', 'epsilon': 1.0, 'sphere': False, 'distribution': 'uniform'},
 #{'noise_type': 'uniform-l0.5', 'epsilon': 10000000000.0, 'sphere': False, 'distribution': 'uniform'},
 #{'noise_type': 'uniform-l1', 'epsilon': 100000.0, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l2', 'epsilon': 150.0, 'sphere': False, 'distribution': 'uniform'},
-{'noise_type': 'uniform-l0-impulse', 'epsilon': 0.6, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l2', 'epsilon': 200.0, 'sphere': False, 'distribution': 'uniform'},
+#{'noise_type': 'uniform-l0-impulse', 'epsilon': 0.5, 'sphere': False, 'distribution': 'uniform'},
 ])
 noise_sparsity = 1.0
 noise_patch_scale = {'lower': 0.2, 'upper': 0.7}
@@ -37,8 +37,8 @@ modeltype = 'ResNet50'
 modelparams = {}
 resize = False
 aggressive_soft_crop = False
-style_orig = {'probability': 0.2, 'alpha_min': 1.0, 'alpha_max': 1.0}
-style_gen = {'probability': 0.2, 'alpha_min': 0.1, 'alpha_max': 1.0}
+style_orig = {'type': 'microast', 'probability': 0.2, 'alpha_min': 1.0, 'alpha_max': 1.0}
+style_gen = {'type': 'microast', 'probability': 0.2, 'alpha_min': 0.1, 'alpha_max': 1.0}
 train_aug_strat_orig = 'TrivialAugmentWide' #TrivialAugmentWide, RandAugment, AutoAugment, AugMix
 train_aug_strat_gen = 'TrivialAugmentWide' #TrivialAugmentWide, RandAugment, AutoAugment, AugMix
 style_and_aug_orig = True
@@ -51,9 +51,9 @@ robust_loss = False
 robust_lossparams = {'num_splits': 3, 'alpha': 12} #jsd if 3 splits, KL divergence if 2 splits
 mixup = {'alpha': 0.2, 'p': 0.0} #default alpha 0.2 #If both mixup and cutmix are >0, mixup or cutmix are selected by 0.5 chance
 cutmix = {'alpha': 1.0, 'p': 0.0} # default alpha 1.0 #If both mixup and cutmix are >0, mixup or cutmix are selected by 0.5 chance
-manifold = {'apply': True, 'noise_factor': 3}
+manifold = {'apply': False, 'noise_factor': 3}
 n2n_deepaugment = False
-RandomEraseProbability = 0.3
+RandomEraseProbability = 0.0
 swa = {'apply': True, 'start_factor': 0.8, 'lr_factor': 0.2}
 
 #define train and test corruptions:
@@ -115,12 +115,12 @@ test_corruptions = np.array([
 ])
 
 test_on_c = True
-combine_test_corruptions = False #augment the test dataset with all corruptions
+combine_test_corruptions = True #augment the test dataset with all corruptions
 calculate_adv_distance = False
-adv_distance_params = {'setsize': 500, 'iters_pgd': 500, 'eps_iter': [0.0003,0.005,0.2], 'iters_second_attack': 40, 'norm': ['inf', 2, 1],
-                       "clever": True, "clever_batches": [5,10,50,500], "clever_samples": [5,20,100,1024]}
+adv_distance_params = {'setsize': 1000, 'iters_pgd': 1000, 'eps_iter': [0.01], 'iters_second_attack': 40, 'norm': [2],
+                       "clever": False, "clever_batches": [10], "clever_samples": [10]}
 calculate_autoattack_robustness = False
-autoattack_params = {'setsize': 1000, 'epsilon': 8/255, 'norm': 'Linf'}
+autoattack_params = {'setsize': 1000, 'epsilon': [0.5, 20], 'norm': ['L2', 'L1']}
 
 if dataset == 'CIFAR10':
     num_classes = 10

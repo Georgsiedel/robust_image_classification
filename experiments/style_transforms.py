@@ -21,7 +21,7 @@ if str(SUBMODULE_ROOT) not in sys.path:
 from micro_ast.net_microAST import Encoder as MicroASTEncoder, Decoder as MicroASTDecoder
 
 # Import AdaIN components
-from experiments.adain.models import vgg as adain_vgg, decoder as adain_decoder
+from experiments.adaIN.model import vgg as adain_vgg, decoder as adain_decoder
 
 # --- Shared Utilities ---
 def calc_mean_std(feat: torch.Tensor, eps: float = 1e-5) -> Tuple[torch.Tensor, torch.Tensor]:

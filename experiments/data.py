@@ -177,12 +177,13 @@ class DataLoading():
         self.data_path = resolve_path("data", suffix)
         self.c_labels_path = resolve_path("c_labels", suffix)
         self.trained_models_path = resolve_path("trained_models", suffix)
-        self.style_feats_path = resolve_path("style_feats", suffix)
+        self.style_feats_path_nst = resolve_path("style_feats_nst", suffix)
+        self.style_feats_path_ast = resolve_path("style_feats_ast", suffix)
         self.write_data_path = resolve_path("write_data", suffix)
 
     def create_transforms(self, train_aug_strat_orig, train_aug_strat_gen=None, 
-                          style_orig={'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, 
-                          style_gen={'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, 
+                          style_orig={'type': "nst", 'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, 
+                          style_gen={'type': "nst", 'probability': 0.0, 'alpha_min': 1.0, 'alpha_max': 1.0}, 
                           style_and_aug_orig=True, style_and_aug_gen=True, 
                           RandomEraseProbability=0.0, 
                           aggressive_soft_crop=False,
@@ -311,9 +312,11 @@ class DataLoading():
         else:
             self.transforms_basic = transforms.Identity()     
 
-        transform_manager_orig = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_orig, 
+        transform_manager_orig = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path_nst, self.style_feats_path_ast, 
+                                                                    self.train_aug_strat_orig, 
                                                                     self.style_orig, self.style_and_aug_orig, self.dataset, self.minibatchsize)
-        transform_manager_gen = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_gen, 
+        transform_manager_gen = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path_nst, self.style_feats_path_ast, 
+                                                                    self.train_aug_strat_gen, 
                                                                     self.style_gen, self.style_and_aug_gen, self.dataset, self.minibatchsize)
         if self.stylization_first:
             self.stylization_orig, self.transforms_orig_after_style, self.transforms_orig_after_nostyle = transform_manager_orig.get_transforms_style_first()
@@ -348,9 +351,11 @@ class DataLoading():
         if style_and_aug_syn is not None:
             self.style_and_aug_gen = style_and_aug_syn
 
-        transform_manager_orig = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_orig, 
+        transform_manager_orig = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path_nst, self.style_feats_path_ast, 
+                                                                    self.train_aug_strat_orig, 
                                                                     self.style_orig, self.style_and_aug_orig, self.dataset, self.minibatchsize)
-        transform_manager_gen = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path, self.train_aug_strat_gen, 
+        transform_manager_gen = custom_transforms.TransformFactory(self.re, self.soft_crop, self.style_feats_path_nst, self.style_feats_path_ast, 
+                                                                    self.train_aug_strat_gen, 
                                                                     self.style_gen, self.style_and_aug_gen, self.dataset, self.minibatchsize)
         if self.stylization_first:
             self.stylization_orig, self.transforms_orig_after_style, self.transforms_orig_after_nostyle = transform_manager_orig.get_transforms_style_first()

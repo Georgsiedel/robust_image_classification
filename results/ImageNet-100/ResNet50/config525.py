@@ -37,8 +37,8 @@ modeltype = 'ResNet50'
 modelparams = {}
 resize = False
 aggressive_soft_crop = False
-style_orig = {'probability': 0.2, 'alpha_min': 1.0, 'alpha_max': 1.0}
-style_gen = {'probability': 0.2, 'alpha_min': 0.1, 'alpha_max': 1.0}
+style_orig = {'type': 'nst', 'probability': 0.2, 'alpha_min': 1.0, 'alpha_max': 1.0}
+style_gen = {'type': 'nst', 'probability': 0.2, 'alpha_min': 0.1, 'alpha_max': 1.0}
 train_aug_strat_orig = 'TrivialAugmentWide' #TrivialAugmentWide, RandAugment, AutoAugment, AugMix
 train_aug_strat_gen = 'TrivialAugmentWide' #TrivialAugmentWide, RandAugment, AutoAugment, AugMix
 style_and_aug_orig = True
@@ -115,12 +115,12 @@ test_corruptions = np.array([
 ])
 
 test_on_c = True
-combine_test_corruptions = False #augment the test dataset with all corruptions
+combine_test_corruptions = True #augment the test dataset with all corruptions
 calculate_adv_distance = False
-adv_distance_params = {'setsize': 500, 'iters_pgd': 500, 'eps_iter': [0.0003,0.005,0.2], 'iters_second_attack': 40, 'norm': ['inf', 2, 1],
-                       "clever": True, "clever_batches": [5,10,50,500], "clever_samples": [5,20,100,1024]}
+adv_distance_params = {'setsize': 1000, 'iters_pgd': 1000, 'eps_iter': [0.01], 'iters_second_attack': 40, 'norm': [2],
+                       "clever": False, "clever_batches": [10], "clever_samples": [10]}
 calculate_autoattack_robustness = False
-autoattack_params = {'setsize': 1000, 'epsilon': 8/255, 'norm': 'Linf'}
+autoattack_params = {'setsize': 1000, 'epsilon': [0.5, 20], 'norm': ['L2', 'L1']}
 
 if dataset == 'CIFAR10':
     num_classes = 10

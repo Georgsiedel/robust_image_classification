@@ -9,7 +9,7 @@ services:
         USER_ID: ${HOST_UID:-1000}
         GROUP_ID: ${HOST_GID:-1000}
     #user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    shm_size: '128g'
+    shm_size: '16g'
     runtime: nvidia
     environment:
       NVIDIA_VISIBLE_DEVICES: "0"  # Restrict to GPU 0
@@ -18,7 +18,7 @@ services:
     volumes:
       - ../datasets:/data
       - ../trained_models:/trained_models
-      - ../robust_training:/workspace
+      - ../robust_image_classification:/workspace
     #cpuset: "0-15"
     #command: python run_exp.py  # Run the main script for this container
     tty: true
