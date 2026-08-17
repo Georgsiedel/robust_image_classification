@@ -1,2 +1,0 @@
-time;train_accuracy;train_loss;valid_accuracy;valid_loss;valid_accuracy_robust;valid_accuracy_swa;valid_accuracy_robust_swa
-124,6902;3,8949;5,0153;8,4400;4,5434;5,0138;8,4400;5,0138
