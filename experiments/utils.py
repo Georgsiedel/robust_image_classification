@@ -94,16 +94,16 @@ def plot_images(
     labels=None,
     corrupted_images=None,
     second_corrupted_images=None,
-    save=False
+    base_height=2.5,
+    save=False,
 ):
-    # Convert images back from normalized space
+    # Denormalize
     images = images * std + mean
 
-    # Default labels if none provided
     if labels is None:
         labels = [""] * number
 
-    # Determine number of columns
+    # Determine column count
     columns = 1
     if corrupted_images is not None:
         corrupted_images = corrupted_images * std + mean
@@ -112,46 +112,68 @@ def plot_images(
             second_corrupted_images = second_corrupted_images * std + mean
             columns = 3
 
-    # Grid figure
+    # Move tensors to CPU and detach to prevent memory leaks/graph retention
+    images = images.detach().cpu()
+    corrupted_images = (
+        corrupted_images.detach().cpu()
+        if corrupted_images is not None
+        else None
+    )
+    second_corrupted_images = (
+        second_corrupted_images.detach().cpu()
+        if second_corrupted_images is not None
+        else None
+    )
+
+    # -------------------------------------------------------------
+    # Adaptive Aspect Ratio Calculation:
+    # Standard PyTorch shapes are [N, C, H, W] or [N, H, W]
+    # -------------------------------------------------------------
+    h, w = images.shape[-2], images.shape[-1]
+    aspect_ratio = w / h
+
+    # Scale width per subplot based on chosen base_height
+    subplot_width = base_height * aspect_ratio
+    fig_width = columns * subplot_width
+    fig_height = number * base_height
+
     fig, axs = plt.subplots(
         number,
         columns,
-        figsize=(2 * columns, number * 2),
-        squeeze=False
+        figsize=(fig_width, fig_height),
+        squeeze=False,
+        layout="constrained",  # Prevents labels from getting clipped
     )
 
-    # Move tensors to CPU
-    images = images.cpu()
-    corrupted_images = corrupted_images.cpu() if corrupted_images is not None else None
-    second_corrupted_images = (
-        second_corrupted_images.cpu() if second_corrupted_images is not None else None
-    )
+    def prepare_img(tensor):
+        # Squeeze handles single batch or channel dims; permutes only if channels exist
+        t = tensor.squeeze()
+        if t.ndim == 3:
+            return t.permute(1, 2, 0).numpy()
+        return t.numpy()
 
-    # Plot each row
     for i in range(number):
-        # original image
-        img = images[i].squeeze().permute(1, 2, 0)
+        # Column 0: Original
+        img = prepare_img(images[i])
         axs[i, 0].imshow(img)
-        #axs[i, 0].axis('off')
         axs[i, 0].set_xlabel(labels[i], fontsize=10)
 
-        # corrupted images
+        # Column 1: Corrupted
         if corrupted_images is not None:
-            cimg = corrupted_images[i].squeeze().permute(1, 2, 0)
+            cimg = prepare_img(corrupted_images[i])
             axs[i, 1].imshow(cimg)
-            #axs[i, 1].axis('off')
             axs[i, 1].set_xlabel(labels[i], fontsize=10)
 
+        # Column 2: Second Corrupted
         if second_corrupted_images is not None:
-            cimg2 = second_corrupted_images[i].squeeze().permute(1, 2, 0)
+            cimg2 = prepare_img(second_corrupted_images[i])
             axs[i, 2].imshow(cimg2)
-            #axs[i, 2].axis('off')
             axs[i, 2].set_xlabel(labels[i], fontsize=10)
 
     if save:
-        plt.savefig(f"./corruption_examples.png")  # Save the figure
+        plt.savefig("./corruption_examples.png", bbox_inches="tight", dpi=300)
     plt.show()
-    plt.close()
+    plt.close(fig)
 
 def calculate_steps(trainset, validset, batchsize, epochs, start_epoch, warmupepochs, validonc, swa, swa_start_factor):
     #+0.5 is a way of rounding up to account for the last partial batch in every epoch
