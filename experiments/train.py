@@ -184,7 +184,7 @@ def train_epoch(pbar):
             inputs, confidences = Dataloader.during_train_transform(inputs)
             
             #if batch_idx == 0:
-            #    plot_images(number=3, images=inputs_orig, mean=model.mean, std=model.std, corrupted_images=inputs, save=True)
+            #    plot_images(number=3, images=inputs_orig, corrupted_images=inputs, save=True)
             
             #robust loss with label smoothing is not implemented, we take only the confidences on clean samples
             if criterion.robust_samples >= 1:
